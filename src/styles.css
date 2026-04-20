@@ -1,0 +1,201 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f2ea;
+  --panel: #fffdf9;
+  --line: rgba(28, 24, 19, 0.12);
+  --text: #1b1814;
+  --muted: #6b6258;
+  --accent: #145f53;
+  --accent-soft: rgba(20, 95, 83, 0.1);
+  --shadow: 0 14px 36px rgba(42, 28, 12, 0.1);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 102, 0.18), transparent 22%),
+    linear-gradient(180deg, #f7f3eb 0%, #f2ede4 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: grid;
+  gap: 14px;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.strip-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.strip input {
+  width: min(420px, 100%);
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.status {
+  font-size: 0.88rem;
+}
+
+.status.muted {
+  color: var(--muted);
+}
+
+.status.success {
+  color: #0e6f48;
+}
+
+.status.warning {
+  color: #a95c12;
+}
+
+.preview-path {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-frame {
+  height: 580px;
+  padding: 8px 10px 12px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  margin: 2px 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.tree-row.selected {
+  background: var(--accent-soft);
+}
+
+.tree-row-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.toggle {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.kind {
+  min-width: 34px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.kind-directory {
+  background: rgba(31, 70, 129, 0.11);
+  color: #28569c;
+}
+
+.kind-module {
+  background: rgba(111, 60, 163, 0.12);
+  color: #6f36a8;
+}
+
+.kind-file {
+  background: rgba(33, 122, 86, 0.12);
+  color: #0f704b;
+}
+
+.label {
+  flex: 1;
+}
+
+.preview-block {
+  margin: 0;
+  padding: 16px;
+  min-height: 220px;
+  max-height: calc(100vh - 680px);
+  overflow: auto;
+  background: #fffdfa;
+  color: #1f1b16;
+  font: 0.92rem/1.55 "Iosevka Term", "SFMono-Regular", "Consolas", monospace;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 800px) {
+  .strip {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .strip-left {
+    flex-direction: column;
+    align-items: start;
+  }
+
+  .tree-frame {
+    height: 460px;
+  }
+
+  .preview-block {
+    max-height: none;
+  }
+}

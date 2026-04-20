@@ -1,0 +1,21 @@
+{
+  "name": "repo-symbol-tree",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "generate:data": "python3 tools/generate_symbol_tree.py --output public/tree-data.json",
+    "dev": "npm run generate:data && ./node_modules/.bin/vite",
+    "build": "npm run generate:data && ./node_modules/.bin/vite build",
+    "preview": "./node_modules/.bin/vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-arborist": "^3.4.3",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "vite": "^8.0.9"
+  }
+}
