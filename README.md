@@ -13,28 +13,88 @@ npm install
 npm run dev
 ```
 
-By default, the scanner reads the current repository root.
+If you already have an old dev session running and hit `Address already in use`, use:
 
-## Scan Another Repo
+```bash
+npm run stop
+npm run dev
+```
 
-Generate data for another checkout:
+or in one command:
+
+```bash
+npm run dev:fresh
+```
+
+This starts:
+
+- a local Python API server on `127.0.0.1:8765`
+- a local symbol translation server on `127.0.0.1:8766`
+- a Vite frontend on `127.0.0.1:4174`
+
+Open the Vite URL in your browser. The UI will:
+
+- scan the current user's home directory for git repos
+- let you choose one repo root
+- remember the last selected repo root on disk
+
+The remembered selection is stored at:
+
+```bash
+~/.config/repo-symbol-tree/state.json
+```
+
+## Build And Serve
+
+```bash
+npm run build
+npm run serve
+```
+
+This starts the built frontend API on `127.0.0.1:8765` and the separate symbol translation server on `127.0.0.1:8766`.
+
+## AI Symbol Translation
+
+The right-side panel can send the current ASCII tree to a local translation server.
+
+Runtime flow:
+
+- frontend sends only the current ASCII tree to the same-origin path `/translate-api`
+- in `npm run dev`, Vite proxies `/translate-api` to `127.0.0.1:8766`
+- in `npm run serve`, `app_server` proxies `/translate-api` to `127.0.0.1:8766`
+- `tools/symbol_translate_server.py` forwards that request to a local OpenAI-compatible proxy
+
+Default upstream target:
+
+```text
+http://127.0.0.1:38080/v1/chat/completions
+```
+
+By default, the frontend always talks to the same-origin path `/translate-api`.
+This avoids browser-direct access to port `8766` and keeps the hop between the page server and translator on the same machine.
+
+Optional environment overrides:
+
+```bash
+export LLM_PROXY_BASE_URL=http://127.0.0.1:38080
+export LLM_PROXY_MODEL=gpt-5.4-mini
+export LLM_PROXY_API_KEY=
+```
+
+You can still override the frontend target explicitly:
+
+```bash
+export VITE_TRANSLATE_API_BASE_URL=http://127.0.0.1:8766
+```
+
+## Manual Tree Export
+
+Generate a static tree payload for any repo root:
 
 ```bash
 python3 tools/generate_symbol_tree.py \
   --repo-root /path/to/repo \
   --output public/tree-data.json
-```
-
-Then run:
-
-```bash
-npm run dev
-```
-
-## Build
-
-```bash
-npm run build
 ```
 
 ## Current Scope
@@ -45,3 +105,6 @@ npm run build
 - Class method extraction
 - Docstring first-line summaries
 - Click-to-copy ASCII symbol summary for `.py` files
+- AI translation that sends only the current ASCII tree to a separate local translator service
+- Repo root selection from the current user's home directory
+- On-disk memory for the last selected repo root

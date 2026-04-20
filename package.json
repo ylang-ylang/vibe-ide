@@ -4,10 +4,16 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "generate:data": "python3 tools/generate_symbol_tree.py --output public/tree-data.json",
-    "dev": "npm run generate:data && ./node_modules/.bin/vite",
-    "build": "npm run generate:data && ./node_modules/.bin/vite build",
-    "preview": "./node_modules/.bin/vite preview"
+    "stop": "python3 tools/stop_dev_servers.py",
+    "dev:api": "python3 tools/app_server.py",
+    "dev:translate": "python3 tools/symbol_translate_server.py --host 0.0.0.0",
+    "dev:web": "./node_modules/.bin/vite",
+    "dev": "./node_modules/.bin/concurrently \"npm run dev:api\" \"npm run dev:translate\" \"npm run dev:web\"",
+    "dev:fresh": "python3 tools/stop_dev_servers.py && npm run dev",
+    "build": "./node_modules/.bin/vite build",
+    "serve:web": "python3 tools/app_server.py --static-dir dist",
+    "serve:translate": "python3 tools/symbol_translate_server.py --host 0.0.0.0",
+    "serve": "./node_modules/.bin/concurrently \"npm run serve:web\" \"npm run serve:translate\""
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -16,6 +22,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
     "vite": "^8.0.9"
   }
 }

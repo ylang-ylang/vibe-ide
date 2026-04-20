@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a real repository tree with Python symbol summaries for the MVP."""
+"""Generate repository tree payloads with Python module summaries."""
 
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ EXCLUDED_DIRS = {
     ".venv",
     "__pycache__",
     "assets",
+    "build",
     "common_assets",
+    "dist",
     "node_modules",
-    "roboverse_root_legacy_20260420",
     "third_party",
 }
 
@@ -51,23 +52,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    repo_root = Path(args.repo_root).resolve()
+    payload = build_tree_payload(args.repo_root)
     output_path = Path(args.output).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    nodes = [_build_directory_node(repo_root, repo_root.name)]
+
+def build_tree_payload(repo_root: str | Path) -> dict:
+    repo_root_path = Path(repo_root).resolve()
+    nodes = [_build_directory_node(repo_root_path, repo_root_path.name)]
     stats = _count_stats(nodes)
-    payload = {
+    return {
         "meta": {
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-            "repo_root": repo_root.name,
+            "repo_root": repo_root_path.name,
+            "repo_root_path": str(repo_root_path),
             "python_files": stats.python_files,
             "total_nodes": stats.total_nodes,
         },
         "nodes": nodes,
     }
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _build_directory_node(path: Path, repo_name: str) -> dict:
@@ -154,7 +158,7 @@ def _build_python_module_node(path: Path, relative_path: str) -> dict:
             "summary": f"Python module with parse error: {exc.msg}",
             "line": exc.lineno or 1,
             "child_count": 0,
-            "symbol_text": f"{path.name}\n└── Parse error: {exc.msg}",
+            "symbol_text": f"{relative_path}\n└── Parse error: {exc.msg}",
         }
 
     module_doc = _first_line(ast.get_docstring(tree))
@@ -176,48 +180,11 @@ def _build_python_module_node(path: Path, relative_path: str) -> dict:
         "line": 1,
         "child_count": len(classes) + len(functions),
         "symbol_text": _render_module_symbol_text(
-            module_name=path.name,
+            module_path=relative_path,
             module_doc=module_doc,
             classes=classes,
             functions=functions,
         ),
-    }
-
-
-def _build_class_node(node: ast.ClassDef, relative_path: str) -> dict:
-    methods: list[dict] = []
-    for child in node.body:
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            methods.append(_build_function_node(child, relative_path, kind="method", parent=node.name))
-
-    return {
-        "id": f"class::{relative_path}:{node.name}:{node.lineno}",
-        "name": node.name,
-        "kind": "class",
-        "path": relative_path,
-        "line": node.lineno,
-        "summary": _first_line(ast.get_docstring(node)) or "Class",
-        "child_count": len(methods),
-        "children": methods,
-    }
-
-
-def _build_function_node(
-    node: ast.FunctionDef | ast.AsyncFunctionDef,
-    relative_path: str,
-    *,
-    kind: str,
-    parent: str | None = None,
-) -> dict:
-    qualified_name = f"{parent}.{node.name}" if parent else node.name
-    return {
-        "id": f"{kind}::{relative_path}:{qualified_name}:{node.lineno}",
-        "name": node.name,
-        "kind": kind,
-        "path": relative_path,
-        "line": node.lineno,
-        "summary": _first_line(ast.get_docstring(node)) or kind.capitalize(),
-        "child_count": 0,
     }
 
 
@@ -251,12 +218,12 @@ def _count_stats(nodes: list[dict]) -> Stats:
 
 def _render_module_symbol_text(
     *,
-    module_name: str,
+    module_path: str,
     module_doc: str | None,
     classes: list[ast.ClassDef],
     functions: list[ast.FunctionDef | ast.AsyncFunctionDef],
 ) -> str:
-    lines: list[str] = [module_name]
+    lines: list[str] = [module_path]
 
     sections: list[tuple[str, list[tuple[str, str | None, list[tuple[str, str | None]]]]]] = []
 
@@ -301,7 +268,7 @@ def _render_module_symbol_text(
                 nested_is_last = nested_index == len(nested_items) - 1
                 nested_prefix = "└──" if nested_is_last else "├──"
                 nested_summary = nested_doc or "No docstring."
-                lines.append(f"{nested_indent}{nested_prefix} {nested_name}: {nested_summary}")
+                lines.append(f"{nested_indent}{nested_prefix} {nested_name}(): {nested_summary}" if not nested_name.endswith("()") else f"{nested_indent}{nested_prefix} {nested_name}: {nested_summary}")
 
     return "\n".join(lines)
 

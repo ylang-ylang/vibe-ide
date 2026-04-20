@@ -28,7 +28,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -38,9 +39,15 @@ input {
 
 .app-shell {
   display: grid;
-  gap: 14px;
   min-height: 100vh;
   padding: 16px;
+}
+
+.workspace-panels {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.15fr) minmax(360px, 0.85fr);
+  gap: 14px;
+  align-items: stretch;
 }
 
 .panel {
@@ -49,6 +56,12 @@ input {
   background: var(--panel);
   box-shadow: var(--shadow);
   overflow: hidden;
+}
+
+.tree-panel,
+.preview-panel {
+  display: flex;
+  flex-direction: column;
 }
 
 .strip {
@@ -67,12 +80,77 @@ input {
   min-width: 0;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .strip input {
   width: min(420px, 100%);
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #fff;
+}
+
+.controls-strip {
+  align-items: end;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.control-group label {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.repo-root-control {
+  flex: 1.2;
+}
+
+.repo-root-control select {
+  flex: 1;
+  min-width: 220px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.repo-root-control button {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.repo-root-control button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.search-control {
+  flex: 1;
+}
+
+.search-control input {
+  width: 100%;
+}
+
+.substrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px 0;
 }
 
 .status {
@@ -91,6 +169,10 @@ input {
   color: #a95c12;
 }
 
+.status.error {
+  color: #a12c2c;
+}
+
 .preview-path {
   min-width: 0;
   color: var(--muted);
@@ -103,6 +185,23 @@ input {
 .tree-frame {
   height: 580px;
   padding: 8px 10px 12px;
+}
+
+.error-banner {
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(169, 92, 18, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 239, 221, 0.8);
+  color: #8a4e10;
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 .tree-row {
@@ -168,16 +267,63 @@ input {
   flex: 1;
 }
 
+.action-button {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.action-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.preview-content {
+  display: grid;
+  grid-template-rows: minmax(220px, 1fr) minmax(220px, 1fr);
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+  padding: 12px;
+}
+
+.preview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.preview-section-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px;
+}
+
 .preview-block {
   margin: 0;
   padding: 16px;
-  min-height: 220px;
-  max-height: calc(100vh - 680px);
+  min-height: 0;
+  height: 100%;
+  flex: 1;
   overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
   background: #fffdfa;
   color: #1f1b16;
   font: 0.92rem/1.55 "Iosevka Term", "SFMono-Regular", "Consolas", monospace;
   white-space: pre-wrap;
+}
+
+@media (max-width: 1000px) {
+  .workspace-panels {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 800px) {
@@ -186,7 +332,10 @@ input {
     align-items: stretch;
   }
 
-  .strip-left {
+  .strip-left,
+  .control-group,
+  .panel-actions,
+  .preview-section-strip {
     flex-direction: column;
     align-items: start;
   }
@@ -195,7 +344,11 @@ input {
     height: 460px;
   }
 
+  .preview-content {
+    grid-template-rows: minmax(220px, 1fr) minmax(220px, 1fr);
+  }
+
   .preview-block {
-    max-height: none;
+    min-height: 220px;
   }
 }
