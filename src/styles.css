@@ -1,3 +1,9 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+
 :root {
   color-scheme: light;
   --bg: #f5f2ea;
@@ -39,15 +45,20 @@ select {
 
 .app-shell {
   display: grid;
-  min-height: 100vh;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 100dvh;
+  height: 100dvh;
   padding: 16px;
 }
 
 .workspace-panels {
   display: grid;
   grid-template-columns: minmax(420px, 1.15fr) minmax(360px, 0.85fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
   align-items: stretch;
+  min-height: 0;
+  height: 100%;
 }
 
 .panel {
@@ -56,12 +67,14 @@ select {
   background: var(--panel);
   box-shadow: var(--shadow);
   overflow: hidden;
+  min-height: 0;
 }
 
 .tree-panel,
 .preview-panel {
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .strip {
@@ -153,6 +166,13 @@ select {
   padding: 10px 14px 0;
 }
 
+.tree-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .status {
   font-size: 0.88rem;
 }
@@ -183,8 +203,17 @@ select {
 }
 
 .tree-frame {
-  height: 580px;
+  display: flex;
+  flex: 1;
+  min-height: 0;
   padding: 8px 10px 12px;
+  overflow: hidden;
+}
+
+.tree-viewport {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 }
 
 .error-banner {
@@ -281,6 +310,29 @@ select {
   opacity: 0.7;
 }
 
+.action-button-group {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.action-button-group .action-button {
+  border-radius: 0;
+}
+
+.action-button-group .action-button:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.action-button-group .action-button:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.action-button-group .action-button + .action-button {
+  margin-left: -1px;
+}
+
 .preview-content {
   display: grid;
   grid-template-rows: minmax(220px, 1fr) minmax(220px, 1fr);
@@ -321,8 +373,15 @@ select {
 }
 
 @media (max-width: 1000px) {
+  .app-shell {
+    min-height: 100dvh;
+    height: auto;
+  }
+
   .workspace-panels {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(360px, 45dvh) minmax(480px, 1fr);
+    height: auto;
   }
 }
 
@@ -335,13 +394,10 @@ select {
   .strip-left,
   .control-group,
   .panel-actions,
-  .preview-section-strip {
+  .preview-section-strip,
+  .tree-toolbar {
     flex-direction: column;
     align-items: start;
-  }
-
-  .tree-frame {
-    height: 460px;
   }
 
   .preview-content {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Tree } from "react-arborist";
 
 const KIND_ICON = {
@@ -172,7 +172,10 @@ export default function App() {
   const [isRefreshingRoots, setIsRefreshingRoots] = useState(false);
   const [isLoadingTree, setIsLoadingTree] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [treeViewportHeight, setTreeViewportHeight] = useState(0);
   const translationRequestIdRef = useRef(0);
+  const treeApiRef = useRef(null);
+  const treeViewportRef = useRef(null);
 
   const selectedRepoOption = useMemo(
     () => repoRoots.find((item) => item.path === selectedRepoRoot) ?? null,
@@ -218,6 +221,39 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useLayoutEffect(() => {
+    const element = treeViewportRef.current;
+    if (!element) {
+      return undefined;
+    }
+
+    function updateHeight(nextHeight) {
+      const normalizedHeight = Math.max(0, Math.floor(nextHeight));
+      setTreeViewportHeight((previousHeight) => (
+        previousHeight === normalizedHeight ? previousHeight : normalizedHeight
+      ));
+    }
+
+    updateHeight(element.getBoundingClientRect().height);
+
+    if (typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      updateHeight(entry.contentRect.height);
+    });
+
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [isBooting, treePayload]);
 
   function resetTranslation() {
     translationRequestIdRef.current += 1;
@@ -367,6 +403,48 @@ export default function App() {
     }
   }
 
+  function getTreeActionTarget() {
+    const tree = treeApiRef.current;
+    if (!tree) {
+      return null;
+    }
+
+    let target = tree.mostRecentNode || tree.focusedNode || tree.firstNode;
+    if (!target) {
+      return null;
+    }
+
+    if (target.isLeaf) {
+      target = target.parent || tree.firstNode;
+    }
+
+    if (target?.isRoot) {
+      target = tree.firstNode;
+    }
+
+    return target?.isInternal ? target : null;
+  }
+
+  function handleExpandTarget() {
+    const target = getTreeActionTarget();
+    if (!target) {
+      return;
+    }
+    target.open();
+  }
+
+  function handleCollapseTarget() {
+    const target = getTreeActionTarget();
+    if (!target) {
+      return;
+    }
+    target.close();
+  }
+
+  function handleExpandAll() {
+    treeApiRef.current?.openAll();
+  }
+
   function NodeRenderer({ node, style }) {
     const isBranch = !node.isLeaf;
     const icon = KIND_ICON[node.data.kind] ?? "?";
@@ -459,36 +537,71 @@ export default function App() {
             <span className="status muted">
               {selectedRepoOption?.label || "no repo root selected"}
             </span>
-            <span className="status muted">
-              {isLoadingTree
-                ? "scanning..."
-                : treePayload
-                  ? `${treePayload.meta.python_files} py files`
-                  : ""}
-            </span>
+            <div className="tree-toolbar">
+              <span className="status muted">
+                {isLoadingTree
+                  ? "scanning..."
+                  : treePayload
+                    ? `${treePayload.meta.python_files} py files`
+                    : ""}
+              </span>
+              <div className="action-button-group" role="group" aria-label="tree branch actions">
+                <button
+                  type="button"
+                  className="action-button"
+                  onClick={handleExpandTarget}
+                  disabled={!treePayload}
+                >
+                  expand
+                </button>
+                <button
+                  type="button"
+                  className="action-button"
+                  onClick={handleCollapseTarget}
+                  disabled={!treePayload}
+                >
+                  collapse
+                </button>
+              </div>
+              <button
+                type="button"
+                className="action-button"
+                onClick={handleExpandAll}
+                disabled={!treePayload}
+              >
+                expand all
+              </button>
+            </div>
           </div>
 
           {loadError ? <div className="error-banner">{loadError}</div> : null}
 
           <div className="tree-frame">
-            {treePayload ? (
-              <Tree
-                data={treePayload.nodes}
-                openByDefault={false}
-                rowHeight={34}
-                indent={18}
-                paddingTop={8}
-                paddingBottom={8}
-                width="100%"
-                height={560}
-                searchTerm={searchTerm}
-                searchMatch={matchNode}
-              >
-                {NodeRenderer}
-              </Tree>
-            ) : (
-              <div className="empty-state">choose one repo root under your home directory</div>
-            )}
+            <div ref={treeViewportRef} className="tree-viewport">
+              {treePayload ? (
+                treeViewportHeight > 0 ? (
+                  <Tree
+                    ref={treeApiRef}
+                    data={treePayload.nodes}
+                    openByDefault={false}
+                    rowHeight={34}
+                    indent={18}
+                    paddingTop={8}
+                    paddingBottom={8}
+                    width="100%"
+                    height={treeViewportHeight}
+                    searchTerm={searchTerm}
+                    searchMatch={matchNode}
+                  >
+                    {NodeRenderer}
+                  </Tree>
+                ) : (
+                  <div className="empty-state">measuring tree viewport...</div>
+                )
+              ) : (
+                <div className="empty-state">choose one repo root under your home directory</div>
+              )}
+            </div>
           </div>
         </section>
 
