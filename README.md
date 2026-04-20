@@ -3,7 +3,7 @@
 Interactive repository tree for Python-heavy codebases.
 
 This tool scans a repository with Python `ast`, builds a compact tree, and lets you click one
-`.py` file to generate and copy an ASCII symbol summary based on module, class, function, method,
+`.py` file to generate and copy a Mermaid module flowchart based on module, class, function, method,
 and docstring first-line data.
 
 ## Run
@@ -12,6 +12,8 @@ and docstring first-line data.
 npm install
 npm run dev
 ```
+
+`npm install` now includes the Mermaid renderer used by the module preview panel.
 
 If you already have an old dev session running and hit `Address already in use`, use:
 
@@ -55,11 +57,11 @@ This starts the built frontend API on `127.0.0.1:8765` and the separate symbol t
 
 ## AI Symbol Translation
 
-The right-side panel can send the current ASCII tree to a local translation server.
+The right-side panel can send the current Mermaid module flowchart to a local translation server.
 
 Runtime flow:
 
-- frontend sends only the current ASCII tree to the same-origin path `/translate-api`
+- frontend sends only the current Mermaid flowchart to the same-origin path `/translate-api`
 - in `npm run dev`, Vite proxies `/translate-api` to `127.0.0.1:8766`
 - in `npm run serve`, `app_server` proxies `/translate-api` to `127.0.0.1:8766`
 - `tools/symbol_translate_server.py` forwards that request to a local OpenAI-compatible proxy
@@ -104,7 +106,7 @@ python3 tools/generate_symbol_tree.py \
 - Top-level class and function extraction
 - Class method extraction
 - Docstring first-line summaries
-- Click-to-copy ASCII symbol summary for `.py` files
-- AI translation that sends only the current ASCII tree to a separate local translator service
+- Click-to-copy Mermaid module flowchart for `.py` files
+- AI translation that sends only the current Mermaid flowchart to a separate local translator service
 - Repo root selection from the current user's home directory
 - On-disk memory for the last selected repo root

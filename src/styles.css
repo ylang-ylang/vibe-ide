@@ -372,6 +372,34 @@ select {
   white-space: pre-wrap;
 }
 
+.diagram-stage,
+.diagram-fallback {
+  min-height: 0;
+  height: 100%;
+  flex: 1;
+}
+
+.diagram-stage {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffdfa;
+  padding: 16px;
+}
+
+.diagram-error {
+  margin: 0 0 8px;
+}
+
+.mermaid-diagram {
+  min-width: fit-content;
+}
+
+.mermaid-diagram svg {
+  display: block;
+  height: auto;
+}
+
 @media (max-width: 1000px) {
   .app-shell {
     min-height: 100dvh;

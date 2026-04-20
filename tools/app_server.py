@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,7 @@ from generate_symbol_tree import build_tree_payload
 
 API_PORT = 8765
 DEFAULT_TRANSLATE_SERVER_BASE_URL = "http://127.0.0.1:8766"
+LOGGER = logging.getLogger("repo_symbol_tree.app_server")
 MAX_SCAN_DEPTH = 5
 SKIP_SCAN_DIRS = {
     ".cache",
@@ -158,6 +160,7 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        LOGGER.info("GET %s", self.path)
 
         if parsed.path.startswith("/translate-api"):
             self._proxy_translate_request("GET")
@@ -197,6 +200,7 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        LOGGER.info("POST %s", self.path)
         if parsed.path.startswith("/translate-api"):
             self._proxy_translate_request("POST")
             return
@@ -213,6 +217,7 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
 
         try:
             selected_root = self.app_state.set_selected_repo_root(repo_root)
+            LOGGER.info("selected repo root: %s", selected_root)
             payload = self.app_state.build_tree(selected_root)
         except ValueError as exc:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
@@ -227,6 +232,7 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        LOGGER.info("OPTIONS %s", self.path)
         if parsed.path.startswith("/translate-api"):
             self._proxy_translate_request("OPTIONS")
             return
@@ -246,7 +252,7 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
         return str((static_dir / "index.html").resolve())
 
     def log_message(self, format: str, *args: object) -> None:
-        return
+        LOGGER.info("%s - %s", self.address_string(), format % args)
 
     def _read_json_body(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -274,6 +280,7 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
         target_url = f"{self.app_state.translate_server_base_url}{proxied_path}"
         if parsed.query:
             target_url = f"{target_url}?{parsed.query}"
+        LOGGER.info("proxy %s %s -> %s", method, self.path, target_url)
 
         body = None
         if method in {"POST", "PUT", "PATCH"}:
@@ -291,6 +298,7 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
             with urlopen(request, timeout=60) as response:
                 payload = response.read()
                 response_headers = response.headers
+                LOGGER.info("proxy response %s %s", response.status, target_url)
                 self._send_proxy_response(
                     status=response.status,
                     payload=payload,
@@ -298,12 +306,14 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
                 )
         except HTTPError as exc:
             payload = exc.read()
+            LOGGER.warning("proxy upstream error %s %s", exc.code, target_url)
             self._send_proxy_response(
                 status=exc.code,
                 payload=payload,
                 content_type=exc.headers.get("Content-Type", "application/json; charset=utf-8"),
             )
         except URLError as exc:
+            LOGGER.error("proxy connect error %s: %s", target_url, exc.reason)
             self._send_error_json(
                 HTTPStatus.BAD_GATEWAY,
                 f"failed to reach local translator at {self.app_state.translate_server_base_url}: {exc.reason}",
@@ -320,10 +330,14 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     args = parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
     app_state = AppState(static_dir=args.static_dir)
     server = ThreadingHTTPServer((args.host, args.port), RepoSymbolTreeHandler)
     server.app_state = app_state  # type: ignore[attr-defined]
-    print(f"repo-symbol-tree server listening on http://{args.host}:{args.port}")
+    LOGGER.info("repo-symbol-tree server listening on http://%s:%s", args.host, args.port)
     server.serve_forever()
 
 

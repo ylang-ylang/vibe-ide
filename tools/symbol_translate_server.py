@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Serve local AI translation for ASCII symbol trees."""
+"""Serve local AI translation for Mermaid module flowcharts."""
 
 import argparse
 import json
+import logging
 import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +15,7 @@ from urllib.request import Request, urlopen
 API_PORT = 8766
 DEFAULT_LLM_PROXY_BASE_URL = "http://127.0.0.1:38080"
 DEFAULT_LLM_PROXY_MODEL = "gpt-5.4-mini"
+LOGGER = logging.getLogger("repo_symbol_tree.symbol_translate")
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,10 +33,11 @@ class TranslationState:
         self.llm_proxy_model = os.environ.get("LLM_PROXY_MODEL", DEFAULT_LLM_PROXY_MODEL)
         self.llm_proxy_api_key = os.environ.get("LLM_PROXY_API_KEY", "")
 
-    def translate_symbol_text(self, ascii_tree: str) -> dict[str, str]:
-        ascii_tree = ascii_tree.strip()
-        if not ascii_tree:
-            raise ValueError("ascii_tree must be a non-empty string")
+    def translate_symbol_text(self, mermaid_flowchart: str) -> dict[str, str]:
+        mermaid_flowchart = mermaid_flowchart.strip()
+        if not mermaid_flowchart:
+            raise ValueError("mermaid_flowchart must be a non-empty string")
+        LOGGER.info("translate request received: %s chars", len(mermaid_flowchart))
 
         request_payload = {
             "model": self.llm_proxy_model,
@@ -42,15 +45,16 @@ class TranslationState:
                 {
                     "role": "system",
                     "content": (
-                        "Translate the user's Python ASCII symbol tree into concise Simplified Chinese. "
-                        "Use only the provided ASCII tree as source context. "
+                        "Translate the user's Mermaid flowchart for one Python module into concise Simplified Chinese. "
+                        "Use only the provided Mermaid flowchart as source context. "
+                        "Describe module path, classes, functions, methods, and docstring summaries only when they are explicitly present. "
                         "Do not infer code details that are not present. "
-                        "Preserve the path first line and keep the tree hierarchy when practical."
+                        "Keep the original hierarchy when practical."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": ascii_tree,
+                    "content": mermaid_flowchart,
                 },
             ],
             "temperature": 0.2,
@@ -72,11 +76,14 @@ class TranslationState:
         try:
             with urlopen(request, timeout=60) as response:
                 payload = json.loads(response.read().decode("utf-8"))
+                LOGGER.info("llm proxy response %s", response.status)
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace").strip()
             message = error_body or exc.reason
+            LOGGER.warning("llm proxy error %s: %s", exc.code, message)
             raise RuntimeError(f"llm proxy returned {exc.code}: {message}") from exc
         except URLError as exc:
+            LOGGER.error("failed to reach llm proxy %s: %s", self.llm_proxy_base_url, exc.reason)
             raise RuntimeError(
                 f"failed to reach llm proxy at {self.llm_proxy_base_url}: {exc.reason}"
             ) from exc
@@ -112,12 +119,14 @@ class SymbolTranslateHandler(BaseHTTPRequestHandler):
         return self.server.translation_state  # type: ignore[attr-defined]
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        LOGGER.info("OPTIONS %s", self.path)
         self.send_response(HTTPStatus.NO_CONTENT.value)
         self._send_cors_headers()
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        LOGGER.info("GET %s", self.path)
         if parsed.path != "/healthz":
             self._send_error_json(HTTPStatus.NOT_FOUND, f"unknown path: {parsed.path}")
             return
@@ -132,18 +141,19 @@ class SymbolTranslateHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        LOGGER.info("POST %s", self.path)
         if parsed.path != "/api/translate-symbol":
             self._send_error_json(HTTPStatus.NOT_FOUND, f"unknown path: {parsed.path}")
             return
 
         body = self._read_json_body()
-        ascii_tree = body.get("ascii_tree")
-        if not isinstance(ascii_tree, str) or not ascii_tree.strip():
-            self._send_error_json(HTTPStatus.BAD_REQUEST, "ascii_tree must be a non-empty string")
+        mermaid_flowchart = body.get("mermaid_flowchart")
+        if not isinstance(mermaid_flowchart, str) or not mermaid_flowchart.strip():
+            self._send_error_json(HTTPStatus.BAD_REQUEST, "mermaid_flowchart must be a non-empty string")
             return
 
         try:
-            payload = self.translation_state.translate_symbol_text(ascii_tree)
+            payload = self.translation_state.translate_symbol_text(mermaid_flowchart)
         except ValueError as exc:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
             return
@@ -154,7 +164,7 @@ class SymbolTranslateHandler(BaseHTTPRequestHandler):
         self._send_json(payload)
 
     def log_message(self, format: str, *args: object) -> None:
-        return
+        LOGGER.info("%s - %s", self.address_string(), format % args)
 
     def _read_json_body(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -185,9 +195,13 @@ class SymbolTranslateHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     args = parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
     server = ThreadingHTTPServer((args.host, args.port), SymbolTranslateHandler)
     server.translation_state = TranslationState()  # type: ignore[attr-defined]
-    print(f"symbol-translate server listening on http://{args.host}:{args.port}")
+    LOGGER.info("symbol-translate server listening on http://%s:%s", args.host, args.port)
     server.serve_forever()
 
 
