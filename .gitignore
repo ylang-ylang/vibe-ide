@@ -2,3 +2,4 @@ node_modules/
 dist/
 public/tree-data.json
 tools/__pycache__/
+.tmp/

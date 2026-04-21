@@ -15,10 +15,30 @@ export function matchNode(node, searchTerm) {
     node.data.summary,
     node.data.symbol_mermaid,
     node.data.symbol_outline_xml,
+    node.data.git_status?.title,
   ].filter(Boolean);
 
   const normalizedTerm = searchTerm.toLowerCase();
   return haystacks.some((value) => String(value).toLowerCase().includes(normalizedTerm));
+}
+
+export function filterTreeByGitStatus(nodes) {
+  function visit(node) {
+    const children = Array.isArray(node.children) ? node.children : [];
+    const keptChildren = children.map(visit).filter(Boolean);
+    const hasGitStatus = Boolean(node.git_status);
+
+    if (!hasGitStatus && keptChildren.length === 0) {
+      return null;
+    }
+
+    return {
+      ...node,
+      children: keptChildren,
+    };
+  }
+
+  return nodes.map(visit).filter(Boolean);
 }
 
 export function collectInternalNodeDepths(nodes) {

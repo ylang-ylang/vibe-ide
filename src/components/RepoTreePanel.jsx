@@ -9,8 +9,10 @@ export default function RepoTreePanel({
   isRefreshingRoots,
   isLoadingTree,
   treePayload,
+  visibleTreeNodes,
   loadError,
   searchTerm,
+  isChangesOnly,
   treeExpandDepth,
   treeDepthControl,
   treeViewportHeight,
@@ -25,10 +27,15 @@ export default function RepoTreePanel({
   onRememberActiveNode,
   onModuleActivate,
   onToggleNode,
+  onToggleChangesOnly,
+  isCollapsed,
+  onToggleCollapsed,
 }) {
   function NodeRenderer({ node, style }) {
     const isBranch = !node.isLeaf;
     const icon = KIND_ICON[node.data.kind] ?? "?";
+    const gitStatus = node.data.git_status || null;
+    const gitStatusKind = gitStatus?.display_kind || gitStatus?.kind || null;
 
     function handleActivate() {
       node.select();
@@ -70,8 +77,36 @@ export default function RepoTreePanel({
           </button>
           <span className={`kind kind-${node.data.kind}`}>{icon}</span>
           <span className="label">{node.data.name}</span>
+          {gitStatus ? (
+            <span
+              className={`git-status-badge git-status-${gitStatusKind} git-status-scope-${gitStatus.scope}`}
+              title={gitStatus.title}
+            >
+              {gitStatus.code}
+            </span>
+          ) : null}
         </div>
       </div>
+    );
+  }
+
+  if (isCollapsed) {
+    return (
+      <section className="panel tree-panel tree-panel-collapsed">
+        <div className="tree-collapsed-shell">
+          <span className="tree-collapsed-label">tree</span>
+          {selectedRepoOption ? (
+            <span className="tree-collapsed-indicator" title={selectedRepoOption.label} />
+          ) : null}
+          <button
+            type="button"
+            className="action-button tree-collapse-button"
+            onClick={onToggleCollapsed}
+          >
+            open
+          </button>
+        </div>
+      </section>
     );
   }
 
@@ -94,6 +129,13 @@ export default function RepoTreePanel({
           </select>
           <button type="button" onClick={() => void onRefreshRepoRoots()} disabled={isRefreshingRoots}>
             {isRefreshingRoots ? "refreshing..." : "refresh"}
+          </button>
+          <button
+            type="button"
+            className="action-button tree-collapse-button"
+            onClick={onToggleCollapsed}
+          >
+            collapse
           </button>
         </div>
 
@@ -148,6 +190,15 @@ export default function RepoTreePanel({
           >
             expand all
           </button>
+          <button
+            type="button"
+            className={`action-button ${isChangesOnly ? "is-active" : ""}`}
+            onClick={onToggleChangesOnly}
+            disabled={!treePayload}
+            title="show only nodes with git status and their parent folders"
+          >
+            changes only
+          </button>
         </div>
       </div>
 
@@ -157,21 +208,27 @@ export default function RepoTreePanel({
         <div ref={treeViewportRef} className="tree-viewport">
           {treePayload ? (
             treeViewportHeight > 0 ? (
-              <Tree
-                ref={treeApiRef}
-                data={treePayload.nodes}
-                openByDefault={false}
-                rowHeight={34}
-                indent={18}
-                paddingTop={8}
-                paddingBottom={8}
-                width="100%"
-                height={treeViewportHeight}
-                searchTerm={searchTerm}
-                searchMatch={matchNode}
-              >
-                {NodeRenderer}
-              </Tree>
+              visibleTreeNodes.length > 0 ? (
+                <Tree
+                  ref={treeApiRef}
+                  data={visibleTreeNodes}
+                  openByDefault={false}
+                  rowHeight={34}
+                  indent={18}
+                  paddingTop={8}
+                  paddingBottom={8}
+                  width="100%"
+                  height={treeViewportHeight}
+                  searchTerm={searchTerm}
+                  searchMatch={matchNode}
+                >
+                  {NodeRenderer}
+                </Tree>
+              ) : (
+                <div className="empty-state">
+                  {isChangesOnly ? "no git changes under selected repo root" : "no tree nodes to display"}
+                </div>
+              )
             ) : (
               <div className="empty-state">measuring tree viewport...</div>
             )

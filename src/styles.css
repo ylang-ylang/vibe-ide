@@ -5,22 +5,27 @@ body,
 }
 
 :root {
-  color-scheme: light;
-  --bg: #f5f2ea;
-  --panel: #fffdf9;
-  --line: rgba(28, 24, 19, 0.12);
-  --text: #1b1814;
-  --muted: #6b6258;
-  --accent: #145f53;
-  --accent-soft: rgba(20, 95, 83, 0.1);
-  --shadow: 0 14px 36px rgba(42, 28, 12, 0.1);
+  color-scheme: dark;
+  --bg: #071018;
+  --panel: rgba(12, 20, 29, 0.92);
+  --surface: #0e1822;
+  --surface-strong: #13202d;
+  --line: rgba(145, 170, 197, 0.16);
+  --line-strong: rgba(145, 170, 197, 0.28);
+  --text: #edf4fb;
+  --muted: #90a4ba;
+  --accent: #59d2c1;
+  --accent-strong: #25a996;
+  --accent-soft: rgba(89, 210, 193, 0.16);
+  --shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   line-height: 1.4;
   font-weight: 400;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(255, 214, 102, 0.18), transparent 22%),
-    linear-gradient(180deg, #f7f3eb 0%, #f2ede4 100%);
+    radial-gradient(circle at top left, rgba(90, 210, 193, 0.14), transparent 24%),
+    radial-gradient(circle at right top, rgba(76, 126, 255, 0.12), transparent 28%),
+    linear-gradient(180deg, #09121a 0%, #060d14 100%);
 }
 
 * {
@@ -31,6 +36,8 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  color: var(--text);
+  background: var(--bg);
 }
 
 button,
@@ -53,7 +60,7 @@ select {
 
 .workspace-panels {
   display: grid;
-  grid-template-columns: minmax(420px, 1.15fr) minmax(360px, 0.85fr);
+  grid-template-columns: minmax(420px, 1.15fr) 10px minmax(360px, 0.85fr);
   grid-template-rows: minmax(0, 1fr);
   gap: 14px;
   align-items: stretch;
@@ -61,13 +68,55 @@ select {
   height: 100%;
 }
 
+.workspace-panels.tree-collapsed {
+  grid-template-columns: 72px minmax(360px, 1fr);
+}
+
+.workspace-panels.is-resizing {
+  cursor: col-resize;
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--panel);
   box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
   overflow: hidden;
   min-height: 0;
+}
+
+.panel-divider {
+  position: relative;
+  min-height: 0;
+  cursor: col-resize;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.panel-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(89, 210, 193, 0.14) 0%,
+    rgba(145, 170, 197, 0.3) 50%,
+    rgba(89, 210, 193, 0.14) 100%
+  );
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+.panel-divider:hover::before,
+.workspace-panels.is-resizing .panel-divider::before {
+  background: linear-gradient(
+    180deg,
+    rgba(89, 210, 193, 0.26) 0%,
+    rgba(145, 170, 197, 0.5) 50%,
+    rgba(89, 210, 193, 0.26) 100%
+  );
+  box-shadow: 0 0 0 1px rgba(89, 210, 193, 0.16);
 }
 
 .tree-panel,
@@ -104,7 +153,8 @@ select {
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
 }
 
 .controls-strip {
@@ -134,14 +184,16 @@ select {
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
 }
 
 .repo-root-control button {
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
 }
 
@@ -182,15 +234,15 @@ select {
 }
 
 .status.success {
-  color: #0e6f48;
+  color: #62d7a8;
 }
 
 .status.warning {
-  color: #a95c12;
+  color: #f0b35b;
 }
 
 .status.error {
-  color: #a12c2c;
+  color: #ff8f96;
 }
 
 .preview-path {
@@ -219,10 +271,10 @@ select {
 .error-banner {
   margin: 10px 14px 0;
   padding: 10px 12px;
-  border: 1px solid rgba(169, 92, 18, 0.28);
+  border: 1px solid rgba(240, 179, 91, 0.28);
   border-radius: 12px;
-  background: rgba(255, 239, 221, 0.8);
-  color: #8a4e10;
+  background: rgba(72, 42, 8, 0.5);
+  color: #f0c98d;
 }
 
 .empty-state {
@@ -245,6 +297,10 @@ select {
   background: var(--accent-soft);
 }
 
+.tree-row:hover {
+  background: rgba(145, 170, 197, 0.08);
+}
+
 .tree-row-content {
   display: flex;
   align-items: center;
@@ -265,7 +321,7 @@ select {
 }
 
 .toggle:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(145, 170, 197, 0.12);
 }
 
 .kind {
@@ -274,33 +330,88 @@ select {
   border-radius: 999px;
   font-size: 0.72rem;
   text-align: center;
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(145, 170, 197, 0.1);
 }
 
 .kind-directory {
-  background: rgba(31, 70, 129, 0.11);
-  color: #28569c;
+  background: rgba(90, 145, 232, 0.18);
+  color: #8db7ff;
 }
 
 .kind-module {
-  background: rgba(111, 60, 163, 0.12);
-  color: #6f36a8;
+  background: rgba(188, 115, 255, 0.18);
+  color: #daa8ff;
 }
 
 .kind-file {
-  background: rgba(33, 122, 86, 0.12);
-  color: #0f704b;
+  background: rgba(72, 200, 146, 0.18);
+  color: #88e7be;
 }
 
 .label {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-status-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  padding: 0 2px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+
+.git-status-scope-children {
+  min-width: 18px;
+}
+
+.git-status-modified {
+  color: #e2c08d;
+}
+
+.git-status-added {
+  color: #81b88b;
+}
+
+.git-status-deleted {
+  color: #c74e39;
+}
+
+.git-status-renamed,
+.git-status-copied {
+  color: #73c991;
+}
+
+.git-status-typechanged {
+  color: #8db9e2;
+}
+
+.git-status-untracked {
+  color: #73c991;
+}
+
+.git-status-conflicted,
+.git-status-mixed {
+  color: #e4676b;
 }
 
 .action-button {
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -308,6 +419,12 @@ select {
 .action-button:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.action-button.is-active {
+  border-color: rgba(89, 210, 193, 0.42);
+  background: rgba(89, 210, 193, 0.16);
+  color: #dffaf6;
 }
 
 .action-button-group {
@@ -341,6 +458,42 @@ select {
   padding: 12px;
 }
 
+.tree-panel-collapsed {
+  justify-content: center;
+  align-items: stretch;
+}
+
+.tree-collapsed-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 10px;
+}
+
+.tree-collapsed-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.tree-collapsed-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(89, 210, 193, 0.14);
+}
+
+.tree-collapse-button {
+  min-width: 0;
+}
+
 .preview-section {
   display: flex;
   flex-direction: column;
@@ -365,8 +518,8 @@ select {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fffdfa;
-  color: #1f1b16;
+  background: var(--surface);
+  color: var(--text);
   font: 0.92rem/1.55 "Iosevka Term", "SFMono-Regular", "Consolas", monospace;
   white-space: pre-wrap;
 }
@@ -382,7 +535,7 @@ select {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fffdfa;
+  background: var(--surface-strong);
   padding: 16px;
 }
 
@@ -399,6 +552,21 @@ select {
   height: auto;
 }
 
+.repo-root-control button:hover:not(:disabled),
+.action-button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: rgba(145, 170, 197, 0.12);
+}
+
+.repo-root-control button:focus-visible,
+.action-button:focus-visible,
+.repo-root-control select:focus-visible,
+.strip input:focus-visible {
+  outline: 2px solid rgba(89, 210, 193, 0.45);
+  outline-offset: 2px;
+  border-color: rgba(89, 210, 193, 0.45);
+}
+
 @media (max-width: 1000px) {
   .app-shell {
     min-height: 100dvh;
@@ -409,6 +577,25 @@ select {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(360px, 45dvh) minmax(480px, 1fr);
     height: auto;
+  }
+
+  .workspace-panels.tree-collapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: 68px minmax(480px, 1fr);
+  }
+
+  .panel-divider {
+    display: none;
+  }
+
+  .tree-collapsed-shell {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .tree-collapsed-label {
+    writing-mode: initial;
+    text-orientation: initial;
   }
 }
 

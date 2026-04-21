@@ -12,6 +12,23 @@ function ensureMermaidInitialized() {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: "loose",
+    theme: "base",
+    themeVariables: {
+      textColor: "#d8e4ef",
+      nodeTextColor: "#151b22",
+      lineColor: "#86a2be",
+      titleColor: "#d8e4ef",
+      edgeLabelBackground: "#152130",
+      tertiaryColor: "#182332",
+      tertiaryTextColor: "#d8e4ef",
+    },
+    themeCSS: [
+      ".symbol-title { font-weight: 700; }",
+      ".symbol-doc { font-style: italic; }",
+    ].join(" "),
+    flowchart: {
+      htmlLabels: true,
+    },
   });
   mermaidInitialized = true;
 }

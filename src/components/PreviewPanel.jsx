@@ -46,6 +46,8 @@ export default function PreviewPanel({
   translationModel,
   isTranslating,
   isShowingTranslated,
+  mermaidDirection,
+  onMermaidDirectionChange,
   onTranslate,
 }) {
   const buttonLabel = getTranslateButtonLabel({
@@ -69,6 +71,24 @@ export default function PreviewPanel({
         </div>
         <div className="panel-actions">
           <CopyStatus copyStatus={copyStatus} />
+          <div className="action-button-group" role="group" aria-label="mermaid direction">
+            <button
+              type="button"
+              className={`action-button ${mermaidDirection === "LR" ? "is-active" : ""}`}
+              onClick={() => onMermaidDirectionChange("LR")}
+              disabled={!previewText}
+            >
+              LR
+            </button>
+            <button
+              type="button"
+              className={`action-button ${mermaidDirection === "TD" ? "is-active" : ""}`}
+              onClick={() => onMermaidDirectionChange("TD")}
+              disabled={!previewText}
+            >
+              TD
+            </button>
+          </div>
           <button
             type="button"
             className="action-button"

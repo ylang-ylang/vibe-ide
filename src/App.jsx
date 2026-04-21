@@ -4,9 +4,28 @@ import PreviewPanel from "./components/PreviewPanel";
 import RepoTreePanel from "./components/RepoTreePanel";
 import { useTreeViewportHeight } from "./hooks/useTreeViewportHeight";
 import { TRANSLATE_API_BASE_URL, copyText, fetchJson, logClient } from "./lib/api";
-import { collectInternalNodeDepths } from "./lib/tree";
+import { collectInternalNodeDepths, filterTreeByGitStatus } from "./lib/tree";
+
+function applyMermaidDirection(chart, direction) {
+  if (!chart) {
+    return chart;
+  }
+
+  if (/^flowchart\s+(?:TB|TD|BT|RL|LR)\b/m.test(chart)) {
+    return chart.replace(/^flowchart\s+(?:TB|TD|BT|RL|LR)\b/m, `flowchart ${direction}`);
+  }
+
+  if (/^graph\s+(?:TB|TD|BT|RL|LR)\b/m.test(chart)) {
+    return chart.replace(/^graph\s+(?:TB|TD|BT|RL|LR)\b/m, `graph ${direction}`);
+  }
+
+  return chart;
+}
 
 export default function App() {
+  const treePanelMinWidth = 280;
+  const previewPanelMinWidth = 360;
+  const panelDividerWidth = 10;
   const [searchTerm, setSearchTerm] = useState("");
   const [repoRoots, setRepoRoots] = useState([]);
   const [selectedRepoRoot, setSelectedRepoRoot] = useState("");
@@ -24,9 +43,16 @@ export default function App() {
   const [isLoadingTree, setIsLoadingTree] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [treeExpandDepth, setTreeExpandDepth] = useState(0);
+  const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
+  const [isChangesOnly, setIsChangesOnly] = useState(false);
+  const [mermaidDirection, setMermaidDirection] = useState("LR");
+  const [treePanelWidth, setTreePanelWidth] = useState(520);
+  const [isResizingPanels, setIsResizingPanels] = useState(false);
   const translationRequestIdRef = useRef(0);
+  const resizeStateRef = useRef({ startX: 0, startWidth: 520 });
   const treeApiRef = useRef(null);
   const treeViewportRef = useRef(null);
+  const workspacePanelsRef = useRef(null);
 
   const selectedRepoOption = useMemo(
     () => repoRoots.find((item) => item.path === selectedRepoRoot) ?? null,
@@ -35,11 +61,23 @@ export default function App() {
   const displayedPreviewText = useMemo(() => (
     previewMode === "translated" && translationText ? translationText : previewText
   ), [previewMode, previewText, translationText]);
+  const visibleTreeNodes = useMemo(() => {
+    const nodes = treePayload?.nodes || [];
+    return isChangesOnly ? filterTreeByGitStatus(nodes) : nodes;
+  }, [treePayload, isChangesOnly]);
+  const orientedPreviewText = useMemo(
+    () => applyMermaidDirection(displayedPreviewText, mermaidDirection),
+    [displayedPreviewText, mermaidDirection],
+  );
   const treeDepthControl = useMemo(
-    () => collectInternalNodeDepths(treePayload?.nodes || []),
-    [treePayload],
+    () => collectInternalNodeDepths(visibleTreeNodes),
+    [visibleTreeNodes],
   );
   const treeViewportHeight = useTreeViewportHeight(treeViewportRef, [isBooting, treePayload]);
+
+  useEffect(() => {
+    setTreeExpandDepth((currentDepth) => Math.min(currentDepth, treeDepthControl.maxExpandDepth));
+  }, [treeDepthControl.maxExpandDepth]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +137,44 @@ export default function App() {
       maxDepth: treeDepthControl.maxExpandDepth,
     });
   }, [treePayload, treeViewportHeight, treeExpandDepth, treeDepthControl]);
+
+  useEffect(() => {
+    if (!isResizingPanels) {
+      return undefined;
+    }
+
+    function handlePointerMove(event) {
+      const workspaceElement = workspacePanelsRef.current;
+      if (!workspaceElement) {
+        return;
+      }
+
+      const workspaceWidth = workspaceElement.getBoundingClientRect().width;
+      const maxTreeWidth = Math.max(
+        treePanelMinWidth,
+        workspaceWidth - panelDividerWidth - previewPanelMinWidth,
+      );
+      const nextWidth = resizeStateRef.current.startWidth + (event.clientX - resizeStateRef.current.startX);
+      const clampedWidth = Math.min(maxTreeWidth, Math.max(treePanelMinWidth, nextWidth));
+      setTreePanelWidth(clampedWidth);
+    }
+
+    function handlePointerUp() {
+      setIsResizingPanels(false);
+    }
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isResizingPanels]);
 
   function resetTranslation() {
     translationRequestIdRef.current += 1;
@@ -331,6 +407,49 @@ export default function App() {
     setTreeExpandDepth(treeDepthControl.maxExpandDepth);
   }
 
+  function handleToggleTreeCollapsed() {
+    setIsTreeCollapsed((currentValue) => {
+      const nextValue = !currentValue;
+      logClient("tree.panel.collapse.toggle", { collapsed: nextValue });
+      return nextValue;
+    });
+  }
+
+  function handleMermaidDirectionChange(nextDirection) {
+    setMermaidDirection(nextDirection);
+    logClient("preview.direction.change", {
+      direction: nextDirection,
+      previewPath,
+    });
+  }
+
+  function handleToggleChangesOnly() {
+    setIsChangesOnly((currentValue) => {
+      const nextValue = !currentValue;
+      logClient("tree.filter.git_status.toggle", {
+        enabled: nextValue,
+      });
+      return nextValue;
+    });
+  }
+
+  function handlePanelResizeStart(event) {
+    if (isTreeCollapsed) {
+      return;
+    }
+
+    resizeStateRef.current = {
+      startX: event.clientX,
+      startWidth: treePanelWidth,
+    };
+    setIsResizingPanels(true);
+    logClient("panel.resize.start", { treePanelWidth });
+  }
+
+  const workspacePanelStyle = isTreeCollapsed
+    ? undefined
+    : { gridTemplateColumns: `${treePanelWidth}px ${panelDividerWidth}px minmax(0, 1fr)` };
+
   if (isBooting) {
     return (
       <main className="app-shell">
@@ -343,7 +462,11 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <div className="workspace-panels">
+      <div
+        ref={workspacePanelsRef}
+        className={`workspace-panels ${isTreeCollapsed ? "tree-collapsed" : ""} ${isResizingPanels ? "is-resizing" : ""}`}
+        style={workspacePanelStyle}
+      >
         <RepoTreePanel
           selectedRepoRoot={selectedRepoRoot}
           repoRoots={repoRoots}
@@ -351,8 +474,10 @@ export default function App() {
           isRefreshingRoots={isRefreshingRoots}
           isLoadingTree={isLoadingTree}
           treePayload={treePayload}
+          visibleTreeNodes={visibleTreeNodes}
           loadError={loadError}
           searchTerm={searchTerm}
+          isChangesOnly={isChangesOnly}
           treeExpandDepth={treeExpandDepth}
           treeDepthControl={treeDepthControl}
           treeViewportHeight={treeViewportHeight}
@@ -367,17 +492,32 @@ export default function App() {
           onRememberActiveNode={rememberActiveNode}
           onModuleActivate={handleModuleActivate}
           onToggleNode={handleToggleNode}
+          onToggleChangesOnly={handleToggleChangesOnly}
+          isCollapsed={isTreeCollapsed}
+          onToggleCollapsed={handleToggleTreeCollapsed}
         />
+
+        {!isTreeCollapsed ? (
+          <div
+            className="panel-divider"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="resize panels"
+            onPointerDown={handlePanelResizeStart}
+          />
+        ) : null}
 
         <PreviewPanel
           previewText={previewText}
-          displayedPreviewText={displayedPreviewText}
+          displayedPreviewText={orientedPreviewText}
           previewPath={previewPath}
           copyStatus={copyStatus}
           translationError={translationError}
           translationModel={translationModel}
           isTranslating={isTranslating}
           isShowingTranslated={previewMode === "translated" && Boolean(translationText)}
+          mermaidDirection={mermaidDirection}
+          onMermaidDirectionChange={handleMermaidDirectionChange}
           onTranslate={() => void handleTranslatePreview()}
         />
       </div>

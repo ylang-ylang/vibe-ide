@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import ast
-import json
 import html
+import json
+import subprocess
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,12 +31,28 @@ EXCLUDED_DIRS = {
 }
 
 INCLUDED_FILE_SUFFIXES = {
+    ".css",
+    ".js",
     ".json",
+    ".jsx",
     ".md",
     ".py",
+    ".ts",
+    ".tsx",
     ".toml",
     ".yaml",
     ".yml",
+}
+
+GIT_STATUS_META = {
+    "conflicted": {"code": "!", "label": "conflicted", "priority": 70},
+    "deleted": {"code": "D", "label": "deleted", "priority": 60},
+    "modified": {"code": "M", "label": "modified", "priority": 50},
+    "added": {"code": "A", "label": "added", "priority": 40},
+    "renamed": {"code": "R", "label": "renamed", "priority": 30},
+    "copied": {"code": "C", "label": "copied", "priority": 20},
+    "typechanged": {"code": "T", "label": "type changed", "priority": 10},
+    "untracked": {"code": "U", "label": "untracked", "priority": 0},
 }
 
 
@@ -61,7 +79,8 @@ def main() -> None:
 
 def build_tree_payload(repo_root: str | Path) -> dict:
     repo_root_path = Path(repo_root).resolve()
-    nodes = [_build_directory_node(repo_root_path, repo_root_path.name)]
+    exact_git_status, directory_git_status = _collect_git_status(repo_root_path)
+    nodes = [_build_directory_node(repo_root_path, repo_root_path.name, exact_git_status, directory_git_status)]
     stats = _count_stats(nodes)
     return {
         "meta": {
@@ -75,9 +94,19 @@ def build_tree_payload(repo_root: str | Path) -> dict:
     }
 
 
-def _build_directory_node(path: Path, repo_name: str) -> dict:
-    children = _build_directory_children(path, repo_root=path)
-    return {
+def _build_directory_node(
+    path: Path,
+    repo_name: str,
+    exact_git_status: dict[str, dict],
+    directory_git_status: dict[str, dict],
+) -> dict:
+    children = _build_directory_children(
+        path,
+        repo_root=path,
+        exact_git_status=exact_git_status,
+        directory_git_status=directory_git_status,
+    )
+    node = {
         "id": f"directory::{repo_name}",
         "name": repo_name,
         "kind": "directory",
@@ -86,29 +115,45 @@ def _build_directory_node(path: Path, repo_name: str) -> dict:
         "child_count": len(children),
         "children": children,
     }
+    root_git_status = directory_git_status.get("")
+    if root_git_status:
+        node["git_status"] = root_git_status
+    return node
 
 
-def _build_directory_children(directory: Path, repo_root: Path) -> list[dict]:
+def _build_directory_children(
+    directory: Path,
+    repo_root: Path,
+    exact_git_status: dict[str, dict],
+    directory_git_status: dict[str, dict],
+) -> list[dict]:
     children: list[dict] = []
     for entry in sorted(_iter_entries(directory), key=lambda item: (not item.is_dir(), item.name.lower())):
         if entry.is_dir():
             if _should_skip_directory(entry):
                 continue
-            nested_children = _build_directory_children(entry, repo_root=repo_root)
+            nested_children = _build_directory_children(
+                entry,
+                repo_root=repo_root,
+                exact_git_status=exact_git_status,
+                directory_git_status=directory_git_status,
+            )
             if not nested_children:
                 continue
             relative_path = entry.relative_to(repo_root).as_posix()
-            children.append(
-                {
-                    "id": f"directory::{relative_path}",
-                    "name": entry.name,
-                    "kind": "directory",
-                    "path": relative_path,
-                    "summary": "Directory",
-                    "child_count": len(nested_children),
-                    "children": nested_children,
-                }
-            )
+            node = {
+                "id": f"directory::{relative_path}",
+                "name": entry.name,
+                "kind": "directory",
+                "path": relative_path,
+                "summary": "Directory",
+                "child_count": len(nested_children),
+                "children": nested_children,
+            }
+            directory_status = directory_git_status.get(relative_path)
+            if directory_status:
+                node["git_status"] = directory_status
+            children.append(node)
             continue
 
         if entry.suffix not in INCLUDED_FILE_SUFFIXES:
@@ -116,18 +161,20 @@ def _build_directory_children(directory: Path, repo_root: Path) -> list[dict]:
 
         relative_path = entry.relative_to(repo_root).as_posix()
         if entry.suffix == ".py":
-            children.append(_build_python_module_node(entry, relative_path))
+            children.append(_build_python_module_node(entry, relative_path, exact_git_status))
         else:
-            children.append(
-                {
-                    "id": f"file::{relative_path}",
-                    "name": entry.name,
-                    "kind": "file",
-                    "path": relative_path,
-                    "summary": f"{entry.suffix[1:].upper()} file",
-                    "child_count": 0,
-                }
-            )
+            node = {
+                "id": f"file::{relative_path}",
+                "name": entry.name,
+                "kind": "file",
+                "path": relative_path,
+                "summary": f"{entry.suffix[1:].upper()} file",
+                "child_count": 0,
+            }
+            file_git_status = exact_git_status.get(relative_path)
+            if file_git_status:
+                node["git_status"] = file_git_status
+            children.append(node)
     return children
 
 
@@ -146,12 +193,12 @@ def _should_skip_directory(path: Path) -> bool:
     return False
 
 
-def _build_python_module_node(path: Path, relative_path: str) -> dict:
+def _build_python_module_node(path: Path, relative_path: str, exact_git_status: dict[str, dict]) -> dict:
     source = path.read_text(encoding="utf-8")
     try:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
-        return {
+        node = {
             "id": f"module::{relative_path}",
             "name": path.name,
             "kind": "module",
@@ -162,6 +209,10 @@ def _build_python_module_node(path: Path, relative_path: str) -> dict:
             "symbol_mermaid": _render_parse_error_mermaid(relative_path, exc.msg),
             "symbol_outline_xml": _render_parse_error_outline_xml(relative_path, exc.msg),
         }
+        module_git_status = exact_git_status.get(relative_path)
+        if module_git_status:
+            node["git_status"] = module_git_status
+        return node
 
     module_doc = _first_line(ast.get_docstring(tree))
     classes: list[ast.ClassDef] = []
@@ -176,7 +227,7 @@ def _build_python_module_node(path: Path, relative_path: str) -> dict:
         elif _is_main_guard(node):
             main_guard = node
 
-    return {
+    node = {
         "id": f"module::{relative_path}",
         "name": path.name,
         "kind": "module",
@@ -198,6 +249,10 @@ def _build_python_module_node(path: Path, relative_path: str) -> dict:
             main_guard=main_guard,
         ),
     }
+    module_git_status = exact_git_status.get(relative_path)
+    if module_git_status:
+        node["git_status"] = module_git_status
+    return node
 
 
 def _first_line(text: str | None) -> str | None:
@@ -226,6 +281,143 @@ def _count_stats(nodes: list[dict]) -> Stats:
 
     walk(nodes)
     return Stats(total_nodes=total_nodes, python_files=python_files)
+
+
+def _collect_git_status(repo_root: Path) -> tuple[dict[str, dict], dict[str, dict]]:
+    try:
+        raw_output = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain=v2", "-z", "--untracked-files=all"],
+            check=True,
+            capture_output=True,
+        ).stdout
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return {}, {}
+
+    exact_status: dict[str, dict] = {}
+    directory_counters: dict[str, Counter[str]] = {"": Counter()}
+    entries = raw_output.split(b"\0")
+    entry_index = 0
+
+    while entry_index < len(entries):
+        raw_entry = entries[entry_index]
+        entry_index += 1
+        if not raw_entry:
+            continue
+
+        entry = raw_entry.decode("utf-8", "replace")
+        record_type = entry[0]
+
+        if record_type == "1":
+            parts = entry.split(" ", 8)
+            if len(parts) != 9:
+                continue
+            kind = _git_status_kind_from_xy(parts[1])
+            path = parts[8]
+        elif record_type == "2":
+            parts = entry.split(" ", 9)
+            if len(parts) != 10:
+                continue
+            kind = _git_status_kind_from_xy(parts[1])
+            path = parts[9]
+            entry_index += 1
+        elif record_type == "u":
+            parts = entry.split(" ", 10)
+            if len(parts) != 11:
+                continue
+            kind = "conflicted"
+            path = parts[10]
+        elif record_type == "?":
+            kind = "untracked"
+            path = entry[2:]
+        else:
+            continue
+
+        if kind is None or not _should_include_git_status_path(path):
+            continue
+
+        exact_status[path] = _build_direct_git_status(kind)
+        for ancestor in _git_status_ancestor_directories(path):
+            directory_counters.setdefault(ancestor, Counter())[kind] += 1
+
+    directory_status = {
+        directory_path: _build_directory_git_status(counter)
+        for directory_path, counter in directory_counters.items()
+        if counter
+    }
+    return exact_status, directory_status
+
+
+def _git_status_kind_from_xy(xy: str) -> str | None:
+    if xy == "??":
+        return "untracked"
+    if "U" in xy or xy in {"AA", "DD"}:
+        return "conflicted"
+    if "D" in xy:
+        return "deleted"
+    if "M" in xy:
+        return "modified"
+    if "A" in xy:
+        return "added"
+    if "R" in xy:
+        return "renamed"
+    if "C" in xy:
+        return "copied"
+    if "T" in xy:
+        return "typechanged"
+    return None
+
+
+def _should_include_git_status_path(path: str) -> bool:
+    relative_path = Path(path)
+    if relative_path.suffix not in INCLUDED_FILE_SUFFIXES:
+        return False
+
+    for part in relative_path.parts[:-1]:
+        if part in EXCLUDED_DIRS:
+            return False
+        if part.startswith(".") and part not in {".codex"}:
+            return False
+    return True
+
+
+def _git_status_ancestor_directories(path: str) -> list[str]:
+    relative_path = Path(path)
+    ancestors = [""]
+    parent_parts = relative_path.parts[:-1]
+    for index in range(1, len(parent_parts) + 1):
+        ancestors.append(Path(*parent_parts[:index]).as_posix())
+    return ancestors
+
+
+def _build_direct_git_status(kind: str) -> dict:
+    meta = GIT_STATUS_META[kind]
+    return {
+        "code": meta["code"],
+        "kind": kind,
+        "scope": "direct",
+        "count": 1,
+        "title": meta["label"],
+    }
+
+
+def _build_directory_git_status(counter: Counter[str]) -> dict:
+    total_count = sum(counter.values())
+    dominant_kind = max(
+        counter.items(),
+        key=lambda item: (GIT_STATUS_META[item[0]]["priority"], item[1], item[0]),
+    )[0]
+    meta = GIT_STATUS_META[dominant_kind]
+    mixed = len(counter) > 1
+    title_parts = [f"{count} {GIT_STATUS_META[kind]['label']}" for kind, count in sorted(counter.items())]
+
+    return {
+        "code": meta["code"] if total_count == 1 else str(total_count),
+        "kind": "mixed" if mixed else dominant_kind,
+        "display_kind": dominant_kind,
+        "scope": "children",
+        "count": total_count,
+        "title": f"{total_count} changed descendants: {', '.join(title_parts)}",
+    }
 
 
 def _render_parse_error_mermaid(module_path: str, error_message: str) -> str:
@@ -450,17 +642,19 @@ def _safe_unparse(node: ast.AST) -> str:
         return "..."
 
 
-def _build_mermaid_label(title: str, summary: str | None = None) -> str:
-    lines = [title]
-    if summary:
-        lines.append(summary)
-    escaped_lines = [
-        html.escape(line, quote=True)
+def _escape_mermaid_html_text(value: str) -> str:
+    return (
+        html.escape(value, quote=True)
         .replace("{", "&#123;")
         .replace("}", "&#125;")
-        for line in lines
-    ]
-    return "<br/>".join(escaped_lines)
+    )
+
+
+def _build_mermaid_label(title: str, summary: str | None = None) -> str:
+    lines = [f"<span class='symbol-title'>{_escape_mermaid_html_text(title)}</span>"]
+    if summary:
+        lines.append(f"<span class='symbol-doc'>{_escape_mermaid_html_text(summary)}</span>")
+    return "<br/>".join(lines)
 
 
 def _xml_text(value: str) -> str:
