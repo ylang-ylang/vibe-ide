@@ -13,7 +13,7 @@ export default function RepoTreePanel({
   loadError,
   searchTerm,
   isChangesOnly,
-  treeExpandDepth,
+  treeBrowseDepth,
   treeDepthControl,
   treeViewportHeight,
   treeApiRef,
@@ -27,6 +27,7 @@ export default function RepoTreePanel({
   onRememberActiveNode,
   onModuleActivate,
   onToggleNode,
+  onTreeToggleStateChange,
   onToggleChangesOnly,
   isCollapsed,
   onToggleCollapsed,
@@ -161,7 +162,7 @@ export default function RepoTreePanel({
             {isLoadingTree
               ? "scanning..."
               : treePayload
-                ? `${treePayload.meta.python_files} py files · level ${treeExpandDepth}/${treeDepthControl.maxExpandDepth}`
+                ? `${treePayload.meta.python_files} py files · deepest ${treeBrowseDepth}/${Math.max(1, treeDepthControl.maxExpandDepth + 1)}`
                 : ""}
           </span>
           <div className="action-button-group" role="group" aria-label="tree depth actions">
@@ -213,6 +214,7 @@ export default function RepoTreePanel({
                   ref={treeApiRef}
                   data={visibleTreeNodes}
                   openByDefault={false}
+                  onToggle={onTreeToggleStateChange}
                   rowHeight={34}
                   indent={18}
                   paddingTop={8}

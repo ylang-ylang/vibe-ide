@@ -4,7 +4,13 @@ import PreviewPanel from "./components/PreviewPanel";
 import RepoTreePanel from "./components/RepoTreePanel";
 import { useTreeViewportHeight } from "./hooks/useTreeViewportHeight";
 import { TRANSLATE_API_BASE_URL, copyText, fetchJson, logClient } from "./lib/api";
-import { collectInternalNodeDepths, filterTreeByGitStatus } from "./lib/tree";
+import {
+  collapseFromDeepestVisibleLevel,
+  collectInternalNodeDepths,
+  expandFromDeepestVisibleLevel,
+  filterTreeByGitStatus,
+  getVisibleTreeDepth,
+} from "./lib/tree";
 
 function applyMermaidDirection(chart, direction) {
   if (!chart) {
@@ -42,7 +48,7 @@ export default function App() {
   const [isRefreshingRoots, setIsRefreshingRoots] = useState(false);
   const [isLoadingTree, setIsLoadingTree] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
-  const [treeExpandDepth, setTreeExpandDepth] = useState(0);
+  const [treeBrowseDepth, setTreeBrowseDepth] = useState(0);
   const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
   const [isChangesOnly, setIsChangesOnly] = useState(false);
   const [mermaidDirection, setMermaidDirection] = useState("LR");
@@ -50,6 +56,7 @@ export default function App() {
   const [isResizingPanels, setIsResizingPanels] = useState(false);
   const translationRequestIdRef = useRef(0);
   const resizeStateRef = useRef({ startX: 0, startWidth: 520 });
+  const treeBrowseSyncFrameRef = useRef(0);
   const treeApiRef = useRef(null);
   const treeViewportRef = useRef(null);
   const workspacePanelsRef = useRef(null);
@@ -75,9 +82,26 @@ export default function App() {
   );
   const treeViewportHeight = useTreeViewportHeight(treeViewportRef, [isBooting, treePayload]);
 
-  useEffect(() => {
-    setTreeExpandDepth((currentDepth) => Math.min(currentDepth, treeDepthControl.maxExpandDepth));
-  }, [treeDepthControl.maxExpandDepth]);
+  function syncTreeBrowseDepth() {
+    const tree = treeApiRef.current;
+    if (tree) {
+      setTreeBrowseDepth(getVisibleTreeDepth(tree));
+      return;
+    }
+
+    setTreeBrowseDepth(visibleTreeNodes.length > 0 ? 1 : 0);
+  }
+
+  function scheduleTreeBrowseDepthSync() {
+    if (treeBrowseSyncFrameRef.current) {
+      window.cancelAnimationFrame(treeBrowseSyncFrameRef.current);
+    }
+
+    treeBrowseSyncFrameRef.current = window.requestAnimationFrame(() => {
+      treeBrowseSyncFrameRef.current = 0;
+      syncTreeBrowseDepth();
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -120,23 +144,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const tree = treeApiRef.current;
-    if (!tree || !treePayload || treeViewportHeight <= 0) {
-      return;
+    if (!treePayload || treeViewportHeight <= 0) {
+      return undefined;
     }
 
-    tree.closeAll();
-    for (let depth = 0; depth < treeExpandDepth; depth += 1) {
-      for (const id of treeDepthControl.idsByDepth[depth] || []) {
-        tree.open(id);
+    scheduleTreeBrowseDepthSync();
+    return () => {
+      if (treeBrowseSyncFrameRef.current) {
+        window.cancelAnimationFrame(treeBrowseSyncFrameRef.current);
+        treeBrowseSyncFrameRef.current = 0;
       }
-    }
-
-    logClient("tree.depth.apply", {
-      depth: treeExpandDepth,
-      maxDepth: treeDepthControl.maxExpandDepth,
-    });
-  }, [treePayload, treeViewportHeight, treeExpandDepth, treeDepthControl]);
+    };
+  }, [treePayload, visibleTreeNodes, searchTerm, treeViewportHeight]);
 
   useEffect(() => {
     if (!isResizingPanels) {
@@ -196,7 +215,7 @@ export default function App() {
         return;
       }
       setTreePayload(payload);
-      setTreeExpandDepth(0);
+      setTreeBrowseDepth(0);
       setPreviewText("");
       setPreviewPath("");
       setCopyStatus(null);
@@ -218,7 +237,7 @@ export default function App() {
     setSelectedRepoRoot(nextRepoRoot);
     if (!nextRepoRoot) {
       setTreePayload(null);
-      setTreeExpandDepth(0);
+      setTreeBrowseDepth(0);
       setPreviewText("");
       setPreviewPath("");
       setCopyStatus(null);
@@ -240,7 +259,7 @@ export default function App() {
 
       setTreePayload(payload.tree_payload);
       setSelectedRepoRoot(payload.selected_repo_root);
-      setTreeExpandDepth(0);
+      setTreeBrowseDepth(0);
       setPreviewText("");
       setPreviewPath("");
       setCopyStatus({
@@ -377,34 +396,49 @@ export default function App() {
   }
 
   function handleExpandTarget() {
-    setTreeExpandDepth((currentDepth) => {
-      const nextDepth = Math.min(treeDepthControl.maxExpandDepth, currentDepth + 1);
-      logClient("tree.expand_level", {
-        fromDepth: currentDepth,
-        toDepth: nextDepth,
-        maxDepth: treeDepthControl.maxExpandDepth,
-      });
-      return nextDepth;
+    const tree = treeApiRef.current;
+    if (!tree) {
+      return;
+    }
+
+    const result = expandFromDeepestVisibleLevel(tree);
+    scheduleTreeBrowseDepthSync();
+    logClient("tree.expand_level", {
+      fromDepth: result.fromDepth,
+      toDepth: result.toDepth,
+      affectedCount: result.affectedCount,
+      maxDepth: Math.max(1, treeDepthControl.maxExpandDepth + 1),
     });
   }
 
   function handleCollapseTarget() {
-    setTreeExpandDepth((currentDepth) => {
-      const nextDepth = Math.max(0, currentDepth - 1);
-      logClient("tree.collapse_level", {
-        fromDepth: currentDepth,
-        toDepth: nextDepth,
-      });
-      return nextDepth;
+    const tree = treeApiRef.current;
+    if (!tree) {
+      return;
+    }
+
+    const result = collapseFromDeepestVisibleLevel(tree);
+    scheduleTreeBrowseDepthSync();
+    logClient("tree.collapse_level", {
+      fromDepth: result.fromDepth,
+      toDepth: result.toDepth,
+      affectedCount: result.affectedCount,
     });
   }
 
   function handleExpandAll() {
+    const tree = treeApiRef.current;
+    if (!tree) {
+      return;
+    }
+
+    const fromDepth = getVisibleTreeDepth(tree);
+    tree.openAll();
+    scheduleTreeBrowseDepthSync();
     logClient("tree.expand_all", {
-      fromDepth: treeExpandDepth,
-      toDepth: treeDepthControl.maxExpandDepth,
+      fromDepth,
+      toDepth: getVisibleTreeDepth(tree),
     });
-    setTreeExpandDepth(treeDepthControl.maxExpandDepth);
   }
 
   function handleToggleTreeCollapsed() {
@@ -430,6 +464,17 @@ export default function App() {
         enabled: nextValue,
       });
       return nextValue;
+    });
+  }
+
+  function handleTreeToggleStateChange(nodeId) {
+    const tree = treeApiRef.current;
+    const isOpen = tree?.isOpen(nodeId) || false;
+    scheduleTreeBrowseDepthSync();
+    logClient("tree.toggle.applied", {
+      nodeId,
+      isOpen,
+      depth: tree ? getVisibleTreeDepth(tree) : 0,
     });
   }
 
@@ -478,7 +523,7 @@ export default function App() {
           loadError={loadError}
           searchTerm={searchTerm}
           isChangesOnly={isChangesOnly}
-          treeExpandDepth={treeExpandDepth}
+          treeBrowseDepth={treeBrowseDepth}
           treeDepthControl={treeDepthControl}
           treeViewportHeight={treeViewportHeight}
           treeApiRef={treeApiRef}
@@ -492,6 +537,7 @@ export default function App() {
           onRememberActiveNode={rememberActiveNode}
           onModuleActivate={handleModuleActivate}
           onToggleNode={handleToggleNode}
+          onTreeToggleStateChange={handleTreeToggleStateChange}
           onToggleChangesOnly={handleToggleChangesOnly}
           isCollapsed={isTreeCollapsed}
           onToggleCollapsed={handleToggleTreeCollapsed}
