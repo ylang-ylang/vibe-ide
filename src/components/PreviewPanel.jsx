@@ -5,7 +5,7 @@ import MermaidDiagram from "./MermaidDiagram";
 
 function CopyStatus({ copyStatus }) {
   if (!copyStatus) {
-    return <span className="status muted">click one `.py` to preview Mermaid + copy XML outline</span>;
+    return <span className="status muted">click one file to preview source; `.py` also shows Mermaid + XML outline</span>;
   }
 
   return <span className={`status ${copyStatus.kind}`}>{copyStatus.message}</span>;
@@ -44,6 +44,7 @@ export default function PreviewPanel({
   previewText,
   displayedPreviewText,
   previewPath,
+  previewSourceLanguage,
   selectedSymbolCodeRows,
   previewSymbols,
   copyStatus,
@@ -76,9 +77,11 @@ export default function PreviewPanel({
     translationModel,
   });
   const showCodePanel = Boolean(selectedSymbol && selectedSymbolCodeRows.length > 0);
+  const showMermaidPanel = Boolean(displayedPreviewText);
+  const useSplitPreview = showMermaidPanel && showCodePanel;
 
   useEffect(() => {
-    if (!showCodePanel) {
+    if (!useSplitPreview) {
       previousShowCodePanelRef.current = false;
       previousPreviewPathRef.current = previewPath || "";
       return;
@@ -89,7 +92,7 @@ export default function PreviewPanel({
     }
     previousShowCodePanelRef.current = true;
     previousPreviewPathRef.current = previewPath || "";
-  }, [showCodePanel, previewPath]);
+  }, [useSplitPreview, previewPath]);
 
   useEffect(() => {
     if (!isResizingPreviewPanels) {
@@ -131,7 +134,7 @@ export default function PreviewPanel({
   }, [isResizingPreviewPanels]);
 
   function handlePreviewDividerPointerDown(event) {
-    if (!showCodePanel) {
+    if (!useSplitPreview) {
       return;
     }
 
@@ -142,7 +145,7 @@ export default function PreviewPanel({
     setIsResizingPreviewPanels(true);
   }
 
-  const previewWorkspaceStyle = showCodePanel
+  const previewWorkspaceStyle = useSplitPreview
     ? {
         gridTemplateRows: `minmax(0, ${diagramSplitRatio}fr) 10px minmax(0, ${1 - diagramSplitRatio}fr)`,
       }
@@ -152,7 +155,7 @@ export default function PreviewPanel({
     <section className="panel preview-panel">
       <div className="strip">
         <div className="strip-left">
-          <strong>module summary</strong>
+          <strong>preview</strong>
           {previewPath ? <span className="preview-path">{previewPath}</span> : null}
         </div>
         <div className="panel-actions">
@@ -162,7 +165,7 @@ export default function PreviewPanel({
               type="button"
               className={`action-button ${mermaidDirection === "LR" ? "is-active" : ""}`}
               onClick={() => onMermaidDirectionChange("LR")}
-              disabled={!previewText}
+              disabled={!showMermaidPanel}
             >
               LR
             </button>
@@ -170,7 +173,7 @@ export default function PreviewPanel({
               type="button"
               className={`action-button ${mermaidDirection === "TD" ? "is-active" : ""}`}
               onClick={() => onMermaidDirectionChange("TD")}
-              disabled={!previewText}
+              disabled={!showMermaidPanel}
             >
               TD
             </button>
@@ -179,7 +182,7 @@ export default function PreviewPanel({
             type="button"
             className="action-button"
             onClick={onTranslate}
-            disabled={!previewText || isTranslating}
+            disabled={!showMermaidPanel || isTranslating}
           >
             {buttonLabel}
           </button>
@@ -187,32 +190,22 @@ export default function PreviewPanel({
       </div>
 
       <div className="preview-content">
-        <div
-          ref={previewSplitRef}
-          className={`preview-workspace ${showCodePanel ? "has-code-panel" : ""} ${isResizingPreviewPanels ? "is-resizing" : ""}`}
-          style={previewWorkspaceStyle}
-        >
-          <section className="preview-section">
-            <div className="preview-section-strip">
-              <strong>module flowchart</strong>
-              <span className={`status ${translationError ? "error" : "muted"}`}>
-                {translationStatus}
-              </span>
-            </div>
-
-            {translationError ? <div className="error-banner">{translationError}</div> : null}
-
-            {!showCodePanel && previewText ? (
-              <div className="symbol-detail-card">
-                <span className="status muted">
-                  {isMermaidInteractive
-                    ? "click a Mermaid node to inspect its full source range"
-                    : "symbol click inspection is available on the original Mermaid view"}
+        {useSplitPreview ? (
+          <div
+            ref={previewSplitRef}
+            className={`preview-workspace has-code-panel ${isResizingPreviewPanels ? "is-resizing" : ""}`}
+            style={previewWorkspaceStyle}
+          >
+            <section className="preview-section">
+              <div className="preview-section-strip">
+                <strong>module flowchart</strong>
+                <span className={`status ${translationError ? "error" : "muted"}`}>
+                  {translationStatus}
                 </span>
               </div>
-            ) : null}
 
-            {displayedPreviewText ? (
+              {translationError ? <div className="error-banner">{translationError}</div> : null}
+
               <MermaidDiagram
                 chart={displayedPreviewText}
                 interactiveSymbols={isMermaidInteractive ? previewSymbols : []}
@@ -220,14 +213,8 @@ export default function PreviewPanel({
                 isInteractive={isMermaidInteractive}
                 onSymbolSelect={onSymbolSelect}
               />
-            ) : (
-              <pre className="preview-block">
-                click one Python module node to render its Mermaid flowchart here
-              </pre>
-            )}
-          </section>
+            </section>
 
-          {showCodePanel ? (
             <div
               className="preview-divider"
               role="separator"
@@ -235,9 +222,7 @@ export default function PreviewPanel({
               aria-label="resize preview panels"
               onPointerDown={handlePreviewDividerPointerDown}
             />
-          ) : null}
 
-          {showCodePanel ? (
             <section className="preview-section">
               <div className="preview-section-strip">
                 <div className="strip-left">
@@ -255,11 +240,63 @@ export default function PreviewPanel({
               </div>
 
               <div className="preview-block symbol-source-block">
-                <CodeBlockView rows={selectedSymbolCodeRows} />
+                <CodeBlockView rows={selectedSymbolCodeRows} language={previewSourceLanguage} />
               </div>
             </section>
-          ) : null}
-        </div>
+          </div>
+        ) : showCodePanel ? (
+          <section className="preview-section preview-section-full">
+            <div className="preview-section-strip">
+              <div className="strip-left">
+                <strong>source preview</strong>
+                <span className={`symbol-kind-badge symbol-kind-${selectedSymbol.kind}`}>{selectedSymbol.kind}</span>
+                <span className="preview-path">{selectedSymbol.title}</span>
+              </div>
+              <span className="status muted">
+                lines {selectedSymbol.line}-{selectedSymbol.line_end || selectedSymbol.line}
+              </span>
+            </div>
+
+            <div className="symbol-detail-card">
+              <span className="status muted">{selectedSymbol.summary || "No summary."}</span>
+            </div>
+
+            <div className="preview-block symbol-source-block">
+              <CodeBlockView rows={selectedSymbolCodeRows} language={previewSourceLanguage} />
+            </div>
+          </section>
+        ) : showMermaidPanel ? (
+          <section className="preview-section">
+            <div className="preview-section-strip">
+              <strong>module flowchart</strong>
+              <span className={`status ${translationError ? "error" : "muted"}`}>
+                {translationStatus}
+              </span>
+            </div>
+
+            {translationError ? <div className="error-banner">{translationError}</div> : null}
+
+            <div className="symbol-detail-card">
+              <span className="status muted">
+                {isMermaidInteractive
+                  ? "click a Mermaid node to inspect its full source range"
+                  : "symbol click inspection is available on the original Mermaid view"}
+              </span>
+            </div>
+
+            <MermaidDiagram
+              chart={displayedPreviewText}
+              interactiveSymbols={isMermaidInteractive ? previewSymbols : []}
+              selectedSymbolId={isMermaidInteractive ? selectedSymbol?.id || "" : ""}
+              isInteractive={isMermaidInteractive}
+              onSymbolSelect={onSymbolSelect}
+            />
+          </section>
+        ) : (
+          <pre className="preview-block">
+            click one file node to preview source; `.py` also renders Mermaid
+          </pre>
+        )}
       </div>
     </section>
   );

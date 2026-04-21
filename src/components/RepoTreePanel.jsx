@@ -25,7 +25,7 @@ export default function RepoTreePanel({
   onCollapseTarget,
   onExpandAll,
   onRememberActiveNode,
-  onModuleActivate,
+  onPreviewNodeActivate,
   onToggleNode,
   onTreeToggleStateChange,
   onToggleChangesOnly,
@@ -42,8 +42,8 @@ export default function RepoTreePanel({
       node.select();
       onRememberActiveNode(node, "click");
 
-      if (node.data.kind === "module") {
-        void onModuleActivate(node);
+      if (node.data.kind === "module" || node.data.kind === "file") {
+        void onPreviewNodeActivate(node);
         return;
       }
 

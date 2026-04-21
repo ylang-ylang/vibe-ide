@@ -41,6 +41,7 @@ export default function App() {
   const [previewText, setPreviewText] = useState("");
   const [previewPath, setPreviewPath] = useState("");
   const [previewSourceText, setPreviewSourceText] = useState("");
+  const [previewSourceLanguage, setPreviewSourceLanguage] = useState(null);
   const [previewSourceGitInfo, setPreviewSourceGitInfo] = useState({ current: [], deleted: [] });
   const [previewSymbols, setPreviewSymbols] = useState([]);
   const [selectedPreviewSymbolId, setSelectedPreviewSymbolId] = useState("");
@@ -233,6 +234,7 @@ export default function App() {
       setPreviewText("");
       setPreviewPath("");
       setPreviewSourceText("");
+      setPreviewSourceLanguage(null);
       setPreviewSourceGitInfo({ current: [], deleted: [] });
       setPreviewSymbols([]);
       setSelectedPreviewSymbolId("");
@@ -259,6 +261,7 @@ export default function App() {
       setPreviewText("");
       setPreviewPath("");
       setPreviewSourceText("");
+      setPreviewSourceLanguage(null);
       setPreviewSourceGitInfo({ current: [], deleted: [] });
       setPreviewSymbols([]);
       setSelectedPreviewSymbolId("");
@@ -285,6 +288,7 @@ export default function App() {
       setPreviewText("");
       setPreviewPath("");
       setPreviewSourceText("");
+      setPreviewSourceLanguage(null);
       setPreviewSourceGitInfo({ current: [], deleted: [] });
       setPreviewSymbols([]);
       setSelectedPreviewSymbolId("");
@@ -316,23 +320,32 @@ export default function App() {
     }
   }
 
-  async function handleModuleActivate(node) {
+  async function handlePreviewNodeActivate(node) {
     const mermaidText = node.data.symbol_mermaid || "";
     const xmlOutlineText = node.data.symbol_outline_xml || "";
     const sourceText = node.data.source_text || "";
+    const sourceLanguage = node.data.code_language || null;
     const sourceGitInfo = node.data.source_git_info || { current: [], deleted: [] };
     const symbolNodes = node.data.symbol_nodes || [];
     setPreviewText(mermaidText);
     setPreviewPath(node.data.path);
     setPreviewSourceText(sourceText);
+    setPreviewSourceLanguage(sourceLanguage);
     setPreviewSourceGitInfo(sourceGitInfo);
     setPreviewSymbols(symbolNodes);
     setSelectedPreviewSymbolId(symbolNodes[0]?.id || "");
     resetTranslation();
-    logClient("module.activate", {
+    logClient("preview.activate", {
       nodeId: node.id,
       path: node.data.path,
+      kind: node.data.kind,
+      language: sourceLanguage,
     });
+
+    if (!xmlOutlineText) {
+      setCopyStatus(null);
+      return;
+    }
 
     try {
       const copied = await copyText(xmlOutlineText);
@@ -576,7 +589,7 @@ export default function App() {
           onCollapseTarget={handleCollapseTarget}
           onExpandAll={handleExpandAll}
           onRememberActiveNode={rememberActiveNode}
-          onModuleActivate={handleModuleActivate}
+          onPreviewNodeActivate={handlePreviewNodeActivate}
           onToggleNode={handleToggleNode}
           onTreeToggleStateChange={handleTreeToggleStateChange}
           onToggleChangesOnly={handleToggleChangesOnly}
@@ -598,6 +611,7 @@ export default function App() {
           previewText={previewText}
           displayedPreviewText={orientedPreviewText}
           previewPath={previewPath}
+          previewSourceLanguage={previewSourceLanguage}
           selectedSymbolCodeRows={selectedPreviewSymbolCodeRows}
           previewSymbols={previewSymbols}
           selectedSymbol={selectedPreviewSymbol}

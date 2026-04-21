@@ -517,6 +517,10 @@ select {
   min-height: 0;
 }
 
+.preview-section-full {
+  flex: 1;
+}
+
 .preview-section-strip {
   display: flex;
   align-items: center;
@@ -565,6 +569,11 @@ select {
 .symbol-kind-method {
   background: rgba(226, 192, 141, 0.16);
   color: #f0c58f;
+}
+
+.symbol-kind-file {
+  background: rgba(115, 201, 145, 0.16);
+  color: #8fe0a4;
 }
 
 .symbol-source-block {
@@ -638,6 +647,10 @@ select {
   padding: 0 12px;
   color: var(--text);
   white-space: pre;
+}
+
+.code-token {
+  color: inherit;
 }
 
 .preview-block {

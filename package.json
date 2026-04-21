@@ -16,6 +16,10 @@
     "serve": "./node_modules/.bin/concurrently \"npm run serve:web\" \"npm run serve:translate\""
   },
   "dependencies": {
+    "@shikijs/core": "^4.0.2",
+    "@shikijs/engine-javascript": "^4.0.2",
+    "@shikijs/langs": "^4.0.2",
+    "@shikijs/themes": "^4.0.2",
     "mermaid": "^11.14.0",
     "react": "^19.2.0",
     "react-arborist": "^3.4.3",
