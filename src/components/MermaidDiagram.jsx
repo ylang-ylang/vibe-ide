@@ -464,44 +464,6 @@ export default function MermaidDiagram({
   }
 
   function handleViewportPointerDown(event) {
-    if (event.button === 2) {
-      if (!isInteractive || typeof onSymbolSelect !== "function") {
-        return;
-      }
-
-      const container = containerRef.current;
-      const nodeElement = event.target instanceof Element
-        ? event.target.closest("g.node")
-        : null;
-
-      if (nodeElement && container?.contains(nodeElement)) {
-        resetRightClickClearState();
-        return;
-      }
-
-      event.preventDefault();
-
-      const previous = rightClickClearStateRef.current;
-      const deltaTime = event.timeStamp - previous.at;
-      const deltaDistance = Math.hypot(event.clientX - previous.x, event.clientY - previous.y);
-      const isRightDoubleClick = previous.at > 0
-        && deltaTime <= RIGHT_CLEAR_DOUBLE_CLICK_WINDOW_MS
-        && deltaDistance <= RIGHT_CLEAR_DOUBLE_CLICK_DISTANCE;
-
-      if (isRightDoubleClick) {
-        resetRightClickClearState();
-        onSymbolSelect("");
-        return;
-      }
-
-      rightClickClearStateRef.current = {
-        at: event.timeStamp,
-        x: event.clientX,
-        y: event.clientY,
-      };
-      return;
-    }
-
     if (event.button !== 0) {
       return;
     }
@@ -515,6 +477,43 @@ export default function MermaidDiagram({
       hasMoved: false,
     };
     setIsPanning(true);
+  }
+
+  function handleViewportContextMenu(event) {
+    event.preventDefault();
+
+    if (!isInteractive || typeof onSymbolSelect !== "function") {
+      return;
+    }
+
+    const container = containerRef.current;
+    const nodeElement = event.target instanceof Element
+      ? event.target.closest("g.node")
+      : null;
+
+    if (nodeElement && container?.contains(nodeElement)) {
+      resetRightClickClearState();
+      return;
+    }
+
+    const previous = rightClickClearStateRef.current;
+    const deltaTime = event.timeStamp - previous.at;
+    const deltaDistance = Math.hypot(event.clientX - previous.x, event.clientY - previous.y);
+    const isRightDoubleClick = previous.at > 0
+      && deltaTime <= RIGHT_CLEAR_DOUBLE_CLICK_WINDOW_MS
+      && deltaDistance <= RIGHT_CLEAR_DOUBLE_CLICK_DISTANCE;
+
+    if (isRightDoubleClick) {
+      resetRightClickClearState();
+      onSymbolSelect("");
+      return;
+    }
+
+    rightClickClearStateRef.current = {
+      at: event.timeStamp,
+      x: event.clientX,
+      y: event.clientY,
+    };
   }
 
   if (renderError) {
@@ -532,9 +531,7 @@ export default function MermaidDiagram({
       className={`diagram-stage ${isPanning ? "is-panning" : ""}`}
       onWheel={handleViewportWheel}
       onPointerDown={handleViewportPointerDown}
-      onContextMenu={(event) => {
-        event.preventDefault();
-      }}
+      onContextMenu={handleViewportContextMenu}
     >
       <div
         className="mermaid-diagram-shell"

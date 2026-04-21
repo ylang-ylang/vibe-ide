@@ -1,5 +1,13 @@
 # TODO
 
+## Current Baseline
+
+- Tree view with git status badges and `changes only`
+- Python symbol extraction via `ast`
+- Mermaid preview plus source code preview
+- XML outline copy for Python modules
+- Mermaid translation through the local translator service
+
 ## LSP / DocumentSymbol as Symbol Extraction Backend
 
 Status: todo
