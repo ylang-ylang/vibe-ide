@@ -54,9 +54,19 @@ export default function MermaidDiagram({
   isInteractive = false,
   onSymbolSelect,
 }) {
+  const viewportRef = useRef(null);
   const containerRef = useRef(null);
+  const panStateRef = useRef({ startX: 0, startY: 0, originX: 0, originY: 0 });
   const [renderError, setRenderError] = useState("");
+  const [selectedOverlayRect, setSelectedOverlayRect] = useState(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const [viewTransform, setViewTransform] = useState({ scale: 1, x: 0, y: 0 });
   const interactiveSymbolIdsRef = useRef(new Set());
+
+  useEffect(() => {
+    setViewTransform({ scale: 1, x: 0, y: 0 });
+    setIsPanning(false);
+  }, [chart]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -153,14 +163,158 @@ export default function MermaidDiagram({
       return;
     }
 
+    const hasActiveSelection = isInteractive && Boolean(selectedSymbolId);
     for (const nodeElement of container.querySelectorAll("g.node")) {
       const isSelected = isInteractive
         && Boolean(selectedSymbolId)
         && nodeElement.dataset.symbolId === selectedSymbolId;
       nodeElement.classList.toggle("selected-symbol-node", isSelected);
+      nodeElement.classList.toggle(
+        "interactive-symbol-faded",
+        hasActiveSelection
+          && Boolean(nodeElement.dataset.symbolId)
+          && nodeElement.dataset.symbolId !== selectedSymbolId,
+      );
       nodeElement.classList.toggle("interactive-symbol-disabled", !isInteractive);
     }
   }, [selectedSymbolId, isInteractive, chart]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !isInteractive || !selectedSymbolId) {
+      setSelectedOverlayRect(null);
+      return undefined;
+    }
+
+    let animationFrameId = 0;
+    const resizeObserver = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => {
+          if (animationFrameId) {
+            window.cancelAnimationFrame(animationFrameId);
+          }
+          animationFrameId = window.requestAnimationFrame(updateSelectedOverlay);
+        })
+      : null;
+
+    function updateSelectedOverlay() {
+      const selectedNode = container.querySelector(`g.node[data-symbol-id="${selectedSymbolId}"]`);
+      if (!selectedNode) {
+        setSelectedOverlayRect(null);
+        return;
+      }
+
+      const viewportRect = viewportRef.current?.getBoundingClientRect();
+      if (!viewportRect) {
+        setSelectedOverlayRect(null);
+        return;
+      }
+
+      const nodeRect = selectedNode.getBoundingClientRect();
+      const padX = 10;
+      const padY = 8;
+
+      setSelectedOverlayRect({
+        left: nodeRect.left - viewportRect.left - padX,
+        top: nodeRect.top - viewportRect.top - padY,
+        width: nodeRect.width + padX * 2,
+        height: nodeRect.height + padY * 2,
+      });
+    }
+
+    updateSelectedOverlay();
+
+    const svgElement = container.querySelector("svg");
+    if (resizeObserver) {
+      resizeObserver.observe(container);
+      if (svgElement) {
+        resizeObserver.observe(svgElement);
+      }
+    }
+    window.addEventListener("resize", updateSelectedOverlay);
+
+    return () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateSelectedOverlay);
+    };
+  }, [chart, isInteractive, selectedSymbolId, viewTransform]);
+
+  useEffect(() => {
+    if (!isPanning) {
+      return undefined;
+    }
+
+    function handlePointerMove(event) {
+      const deltaX = event.clientX - panStateRef.current.startX;
+      const deltaY = event.clientY - panStateRef.current.startY;
+      setViewTransform((current) => ({
+        ...current,
+        x: panStateRef.current.originX + deltaX,
+        y: panStateRef.current.originY + deltaY,
+      }));
+    }
+
+    function handlePointerUp() {
+      setIsPanning(false);
+    }
+
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isPanning]);
+
+  function handleViewportWheel(event) {
+    if (!viewportRef.current || !containerRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const viewportRect = viewportRef.current.getBoundingClientRect();
+    const pointerX = event.clientX - viewportRect.left;
+    const pointerY = event.clientY - viewportRect.top;
+
+    setViewTransform((current) => {
+      const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+      const nextScale = Math.min(4.5, Math.max(0.35, current.scale * zoomFactor));
+      if (Math.abs(nextScale - current.scale) < 0.0001) {
+        return current;
+      }
+
+      const contentX = (pointerX - current.x) / current.scale;
+      const contentY = (pointerY - current.y) / current.scale;
+      return {
+        scale: nextScale,
+        x: pointerX - (contentX * nextScale),
+        y: pointerY - (contentY * nextScale),
+      };
+    });
+  }
+
+  function handleViewportPointerDown(event) {
+    if (event.button !== 1) {
+      return;
+    }
+
+    event.preventDefault();
+    panStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: viewTransform.x,
+      originY: viewTransform.y,
+    };
+    setIsPanning(true);
+  }
 
   if (renderError) {
     return (
@@ -172,8 +326,41 @@ export default function MermaidDiagram({
   }
 
   return (
-    <div className="diagram-stage">
-      <div ref={containerRef} className="mermaid-diagram" />
+    <div
+      ref={viewportRef}
+      className={`diagram-stage ${isPanning ? "is-panning" : ""}`}
+      onWheel={handleViewportWheel}
+      onPointerDown={handleViewportPointerDown}
+      onMouseDown={(event) => {
+        if (event.button === 1) {
+          event.preventDefault();
+        }
+      }}
+      onAuxClick={(event) => {
+        if (event.button === 1) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <div
+        className="mermaid-diagram-shell"
+        style={{
+          transform: `translate(${viewTransform.x}px, ${viewTransform.y}px) scale(${viewTransform.scale})`,
+        }}
+      >
+        <div ref={containerRef} className="mermaid-diagram" />
+      </div>
+        {selectedOverlayRect ? (
+          <div
+            className="mermaid-selection-overlay"
+            style={{
+              left: `${selectedOverlayRect.left}px`,
+              top: `${selectedOverlayRect.top}px`,
+              width: `${selectedOverlayRect.width}px`,
+              height: `${selectedOverlayRect.height}px`,
+            }}
+          />
+        ) : null}
     </div>
   );
 }

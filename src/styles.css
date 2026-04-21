@@ -676,11 +676,16 @@ select {
 }
 
 .diagram-stage {
-  overflow: auto;
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface-strong);
   padding: 16px;
+}
+
+.diagram-stage.is-panning {
+  cursor: grabbing;
 }
 
 .preview-divider {
@@ -721,6 +726,14 @@ select {
   margin: 0 0 8px;
 }
 
+.mermaid-diagram-shell {
+  position: relative;
+  width: fit-content;
+  min-width: fit-content;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
 .mermaid-diagram {
   min-width: fit-content;
 }
@@ -746,23 +759,71 @@ select {
   stroke-width: 2px;
 }
 
+.mermaid-diagram g.interactive-symbol-faded {
+  opacity: 0.38;
+}
+
 .mermaid-diagram g.selected-symbol-node .label-container,
 .mermaid-diagram g.selected-symbol-node .outer-path,
 .mermaid-diagram g.selected-symbol-node rect.basic,
 .mermaid-diagram g.selected-symbol-node polygon.basic,
 .mermaid-diagram g.selected-symbol-node path.basic {
-  filter: drop-shadow(0 0 10px rgba(89, 210, 193, 0.22));
+  filter: brightness(1.14) drop-shadow(0 0 12px rgba(89, 210, 193, 0.32));
   stroke: #59d2c1;
-  stroke-width: 2.4px;
+  stroke-width: 2.8px;
 }
 
 .mermaid-diagram g.interactive-symbol-disabled {
   cursor: default;
 }
 
+.mermaid-selection-overlay {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 18px;
+  border: 2px solid rgba(89, 210, 193, 0.92);
+  background: linear-gradient(180deg, rgba(89, 210, 193, 0.08) 0%, rgba(89, 210, 193, 0.02) 100%);
+  box-shadow:
+    0 0 0 1px rgba(89, 210, 193, 0.22),
+    0 0 24px rgba(89, 210, 193, 0.22),
+    inset 0 0 0 1px rgba(223, 250, 246, 0.16);
+  animation: mermaid-selection-pulse 1.65s ease-in-out infinite;
+}
+
+.mermaid-selection-overlay::before,
+.mermaid-selection-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px dashed rgba(89, 210, 193, 0.38);
+  border-radius: 12px;
+}
+
+.mermaid-selection-overlay::after {
+  inset: -7px;
+  border: 1px solid rgba(89, 210, 193, 0.16);
+  border-radius: 22px;
+}
+
 .mermaid-diagram svg {
   display: block;
   height: auto;
+}
+
+@keyframes mermaid-selection-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(89, 210, 193, 0.18),
+      0 0 18px rgba(89, 210, 193, 0.16),
+      inset 0 0 0 1px rgba(223, 250, 246, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(89, 210, 193, 0.28),
+      0 0 30px rgba(89, 210, 193, 0.3),
+      inset 0 0 0 1px rgba(223, 250, 246, 0.2);
+  }
 }
 
 .repo-root-control button:hover:not(:disabled),
