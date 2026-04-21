@@ -266,7 +266,7 @@ export default function PreviewPanel({
             </div>
           </section>
         ) : showMermaidPanel ? (
-          <section className="preview-section">
+          <section className="preview-section preview-section-full">
             <div className="preview-section-strip">
               <strong>module flowchart</strong>
               <span className={`status ${translationError ? "error" : "muted"}`}>
