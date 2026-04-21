@@ -472,21 +472,6 @@ export default function App() {
     });
   }
 
-  function handleExpandAll() {
-    const tree = treeApiRef.current;
-    if (!tree) {
-      return;
-    }
-
-    const fromDepth = getVisibleTreeDepth(tree);
-    tree.openAll();
-    scheduleTreeBrowseDepthSync();
-    logClient("tree.expand_all", {
-      fromDepth,
-      toDepth: getVisibleTreeDepth(tree),
-    });
-  }
-
   function handleToggleTreeCollapsed() {
     setIsTreeCollapsed((currentValue) => {
       const nextValue = !currentValue;
@@ -587,7 +572,6 @@ export default function App() {
           onSearchTermChange={setSearchTerm}
           onExpandTarget={handleExpandTarget}
           onCollapseTarget={handleCollapseTarget}
-          onExpandAll={handleExpandAll}
           onRememberActiveNode={rememberActiveNode}
           onPreviewNodeActivate={handlePreviewNodeActivate}
           onToggleNode={handleToggleNode}

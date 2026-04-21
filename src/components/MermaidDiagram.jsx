@@ -5,6 +5,9 @@ let mermaidInitialized = false;
 let mermaidRenderId = 0;
 const MIN_VIEW_SCALE = 0.1;
 const MAX_VIEW_SCALE = 12;
+const PAN_CLICK_SUPPRESS_DISTANCE = 4;
+const RIGHT_CLEAR_DOUBLE_CLICK_WINDOW_MS = 360;
+const RIGHT_CLEAR_DOUBLE_CLICK_DISTANCE = 12;
 
 function ensureMermaidInitialized() {
   if (mermaidInitialized) {
@@ -112,13 +115,25 @@ export default function MermaidDiagram({
 }) {
   const viewportRef = useRef(null);
   const containerRef = useRef(null);
-  const panStateRef = useRef({ startX: 0, startY: 0, originX: 0, originY: 0 });
+  const panStateRef = useRef({
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+    hasMoved: false,
+  });
   const hasUserAdjustedViewRef = useRef(false);
+  const suppressNextClickRef = useRef(false);
+  const rightClickClearStateRef = useRef({ at: 0, x: 0, y: 0 });
   const [renderError, setRenderError] = useState("");
   const [selectedOverlayRect, setSelectedOverlayRect] = useState(null);
   const [isPanning, setIsPanning] = useState(false);
   const [viewTransform, setViewTransform] = useState({ scale: 1, x: 0, y: 0 });
   const interactiveSymbolIdsRef = useRef(new Set());
+
+  function resetRightClickClearState() {
+    rightClickClearStateRef.current = { at: 0, x: 0, y: 0 };
+  }
 
   useEffect(() => {
     hasUserAdjustedViewRef.current = false;
@@ -266,21 +281,25 @@ export default function MermaidDiagram({
         return;
       }
 
+      if (suppressNextClickRef.current) {
+        suppressNextClickRef.current = false;
+        return;
+      }
+
       const nodeElement = event.target instanceof Element
         ? event.target.closest("g.node")
         : null;
 
       if (!nodeElement || !container.contains(nodeElement)) {
-        onSymbolSelect("");
         return;
       }
 
       const symbolId = nodeElement.dataset.symbolId || parseFlowchartSymbolId(nodeElement.id);
       if (!interactiveSymbolIdsRef.current.has(symbolId)) {
-        onSymbolSelect("");
         return;
       }
 
+      resetRightClickClearState();
       onSymbolSelect(symbolId);
     }
 
@@ -382,6 +401,12 @@ export default function MermaidDiagram({
     function handlePointerMove(event) {
       const deltaX = event.clientX - panStateRef.current.startX;
       const deltaY = event.clientY - panStateRef.current.startY;
+      if (
+        !panStateRef.current.hasMoved
+        && Math.hypot(deltaX, deltaY) >= PAN_CLICK_SUPPRESS_DISTANCE
+      ) {
+        panStateRef.current.hasMoved = true;
+      }
       setViewTransform((current) => ({
         ...current,
         x: panStateRef.current.originX + deltaX,
@@ -390,6 +415,9 @@ export default function MermaidDiagram({
     }
 
     function handlePointerUp() {
+      if (panStateRef.current.hasMoved) {
+        suppressNextClickRef.current = true;
+      }
       setIsPanning(false);
     }
 
@@ -436,17 +464,55 @@ export default function MermaidDiagram({
   }
 
   function handleViewportPointerDown(event) {
-    if (event.button !== 2) {
+    if (event.button === 2) {
+      if (!isInteractive || typeof onSymbolSelect !== "function") {
+        return;
+      }
+
+      const container = containerRef.current;
+      const nodeElement = event.target instanceof Element
+        ? event.target.closest("g.node")
+        : null;
+
+      if (nodeElement && container?.contains(nodeElement)) {
+        resetRightClickClearState();
+        return;
+      }
+
+      event.preventDefault();
+
+      const previous = rightClickClearStateRef.current;
+      const deltaTime = event.timeStamp - previous.at;
+      const deltaDistance = Math.hypot(event.clientX - previous.x, event.clientY - previous.y);
+      const isRightDoubleClick = previous.at > 0
+        && deltaTime <= RIGHT_CLEAR_DOUBLE_CLICK_WINDOW_MS
+        && deltaDistance <= RIGHT_CLEAR_DOUBLE_CLICK_DISTANCE;
+
+      if (isRightDoubleClick) {
+        resetRightClickClearState();
+        onSymbolSelect("");
+        return;
+      }
+
+      rightClickClearStateRef.current = {
+        at: event.timeStamp,
+        x: event.clientX,
+        y: event.clientY,
+      };
       return;
     }
 
-    event.preventDefault();
+    if (event.button !== 0) {
+      return;
+    }
+
     hasUserAdjustedViewRef.current = true;
     panStateRef.current = {
       startX: event.clientX,
       startY: event.clientY,
       originX: viewTransform.x,
       originY: viewTransform.y,
+      hasMoved: false,
     };
     setIsPanning(true);
   }
@@ -468,16 +534,6 @@ export default function MermaidDiagram({
       onPointerDown={handleViewportPointerDown}
       onContextMenu={(event) => {
         event.preventDefault();
-      }}
-      onMouseDown={(event) => {
-        if (event.button === 2) {
-          event.preventDefault();
-        }
-      }}
-      onAuxClick={(event) => {
-        if (event.button === 2) {
-          event.preventDefault();
-        }
       }}
     >
       <div

@@ -23,7 +23,6 @@ export default function RepoTreePanel({
   onSearchTermChange,
   onExpandTarget,
   onCollapseTarget,
-  onExpandAll,
   onRememberActiveNode,
   onPreviewNodeActivate,
   onToggleNode,
@@ -183,14 +182,6 @@ export default function RepoTreePanel({
               collapse
             </button>
           </div>
-          <button
-            type="button"
-            className="action-button"
-            onClick={onExpandAll}
-            disabled={!treePayload}
-          >
-            expand all
-          </button>
           <button
             type="button"
             className={`action-button ${isChangesOnly ? "is-active" : ""}`}
