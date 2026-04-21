@@ -38,9 +38,25 @@ function nextMermaidRenderId() {
   return `repo-symbol-tree-mermaid-${mermaidRenderId}`;
 }
 
-export default function MermaidDiagram({ chart }) {
+function parseFlowchartSymbolId(domId) {
+  if (!domId) {
+    return "";
+  }
+
+  const match = domId.match(/(?:^|-)flowchart-([A-Za-z0-9_]+)-\d+$/);
+  return match?.[1] || "";
+}
+
+export default function MermaidDiagram({
+  chart,
+  interactiveSymbols = [],
+  selectedSymbolId = "",
+  isInteractive = false,
+  onSymbolSelect,
+}) {
   const containerRef = useRef(null);
   const [renderError, setRenderError] = useState("");
+  const interactiveSymbolIdsRef = useRef(new Set());
 
   useEffect(() => {
     const container = containerRef.current;
@@ -69,6 +85,19 @@ export default function MermaidDiagram({ chart }) {
 
         containerRef.current.innerHTML = svg;
         bindFunctions?.(containerRef.current);
+
+        const symbolIds = new Set(interactiveSymbols.map((symbol) => symbol.id));
+        interactiveSymbolIdsRef.current = symbolIds;
+
+        for (const nodeElement of containerRef.current.querySelectorAll("g.node")) {
+          const symbolId = parseFlowchartSymbolId(nodeElement.id);
+          if (!symbolIds.has(symbolId)) {
+            continue;
+          }
+
+          nodeElement.dataset.symbolId = symbolId;
+          nodeElement.classList.add("interactive-symbol-node");
+        }
       } catch (error) {
         if (!cancelled) {
           setRenderError(error instanceof Error ? error.message : String(error));
@@ -81,7 +110,57 @@ export default function MermaidDiagram({ chart }) {
     return () => {
       cancelled = true;
     };
-  }, [chart]);
+  }, [chart, interactiveSymbols]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return undefined;
+    }
+
+    function handleClick(event) {
+      if (!isInteractive || typeof onSymbolSelect !== "function") {
+        return;
+      }
+
+      const nodeElement = event.target instanceof Element
+        ? event.target.closest("g.node")
+        : null;
+
+      if (!nodeElement || !container.contains(nodeElement)) {
+        onSymbolSelect("");
+        return;
+      }
+
+      const symbolId = nodeElement.dataset.symbolId || parseFlowchartSymbolId(nodeElement.id);
+      if (!interactiveSymbolIdsRef.current.has(symbolId)) {
+        onSymbolSelect("");
+        return;
+      }
+
+      onSymbolSelect(symbolId);
+    }
+
+    container.addEventListener("click", handleClick);
+    return () => {
+      container.removeEventListener("click", handleClick);
+    };
+  }, [isInteractive, onSymbolSelect]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    for (const nodeElement of container.querySelectorAll("g.node")) {
+      const isSelected = isInteractive
+        && Boolean(selectedSymbolId)
+        && nodeElement.dataset.symbolId === selectedSymbolId;
+      nodeElement.classList.toggle("selected-symbol-node", isSelected);
+      nodeElement.classList.toggle("interactive-symbol-disabled", !isInteractive);
+    }
+  }, [selectedSymbolId, isInteractive, chart]);
 
   if (renderError) {
     return (

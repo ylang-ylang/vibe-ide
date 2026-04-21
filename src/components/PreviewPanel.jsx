@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from "react";
+
+import CodeBlockView from "./CodeBlockView";
 import MermaidDiagram from "./MermaidDiagram";
 
 function CopyStatus({ copyStatus }) {
@@ -41,15 +44,26 @@ export default function PreviewPanel({
   previewText,
   displayedPreviewText,
   previewPath,
+  selectedSymbolCodeRows,
+  previewSymbols,
   copyStatus,
   translationError,
   translationModel,
   isTranslating,
   isShowingTranslated,
   mermaidDirection,
+  selectedSymbol,
+  isMermaidInteractive,
   onMermaidDirectionChange,
+  onSymbolSelect,
   onTranslate,
 }) {
+  const previewSplitRef = useRef(null);
+  const previewResizeStateRef = useRef({ startY: 0, startRatio: 0.5 });
+  const previousShowCodePanelRef = useRef(false);
+  const previousPreviewPathRef = useRef("");
+  const [diagramSplitRatio, setDiagramSplitRatio] = useState(0.5);
+  const [isResizingPreviewPanels, setIsResizingPreviewPanels] = useState(false);
   const buttonLabel = getTranslateButtonLabel({
     isTranslating,
     isShowingTranslated,
@@ -61,6 +75,78 @@ export default function PreviewPanel({
     translationError,
     translationModel,
   });
+  const showCodePanel = Boolean(selectedSymbol && selectedSymbolCodeRows.length > 0);
+
+  useEffect(() => {
+    if (!showCodePanel) {
+      previousShowCodePanelRef.current = false;
+      previousPreviewPathRef.current = previewPath || "";
+      return;
+    }
+
+    if (!previousShowCodePanelRef.current || previousPreviewPathRef.current !== (previewPath || "")) {
+      setDiagramSplitRatio(0.5);
+    }
+    previousShowCodePanelRef.current = true;
+    previousPreviewPathRef.current = previewPath || "";
+  }, [showCodePanel, previewPath]);
+
+  useEffect(() => {
+    if (!isResizingPreviewPanels) {
+      return undefined;
+    }
+
+    function handlePointerMove(event) {
+      const previewElement = previewSplitRef.current;
+      if (!previewElement) {
+        return;
+      }
+
+      const { height } = previewElement.getBoundingClientRect();
+      if (height <= 0) {
+        return;
+      }
+
+      const deltaY = event.clientY - previewResizeStateRef.current.startY;
+      const nextRatio = previewResizeStateRef.current.startRatio + (deltaY / height);
+      const clampedRatio = Math.min(0.8, Math.max(0.2, nextRatio));
+      setDiagramSplitRatio(clampedRatio);
+    }
+
+    function handlePointerUp() {
+      setIsResizingPreviewPanels(false);
+    }
+
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isResizingPreviewPanels]);
+
+  function handlePreviewDividerPointerDown(event) {
+    if (!showCodePanel) {
+      return;
+    }
+
+    previewResizeStateRef.current = {
+      startY: event.clientY,
+      startRatio: diagramSplitRatio,
+    };
+    setIsResizingPreviewPanels(true);
+  }
+
+  const previewWorkspaceStyle = showCodePanel
+    ? {
+        gridTemplateRows: `minmax(0, ${diagramSplitRatio}fr) 10px minmax(0, ${1 - diagramSplitRatio}fr)`,
+      }
+    : undefined;
 
   return (
     <section className="panel preview-panel">
@@ -101,24 +187,79 @@ export default function PreviewPanel({
       </div>
 
       <div className="preview-content">
-        <section className="preview-section">
-          <div className="preview-section-strip">
-            <strong>module flowchart</strong>
-            <span className={`status ${translationError ? "error" : "muted"}`}>
-              {translationStatus}
-            </span>
-          </div>
+        <div
+          ref={previewSplitRef}
+          className={`preview-workspace ${showCodePanel ? "has-code-panel" : ""} ${isResizingPreviewPanels ? "is-resizing" : ""}`}
+          style={previewWorkspaceStyle}
+        >
+          <section className="preview-section">
+            <div className="preview-section-strip">
+              <strong>module flowchart</strong>
+              <span className={`status ${translationError ? "error" : "muted"}`}>
+                {translationStatus}
+              </span>
+            </div>
 
-          {translationError ? <div className="error-banner">{translationError}</div> : null}
+            {translationError ? <div className="error-banner">{translationError}</div> : null}
 
-          {displayedPreviewText ? (
-            <MermaidDiagram chart={displayedPreviewText} />
-          ) : (
-            <pre className="preview-block">
-              click one Python module node to render its Mermaid flowchart here
-            </pre>
-          )}
-        </section>
+            {!showCodePanel && previewText ? (
+              <div className="symbol-detail-card">
+                <span className="status muted">
+                  {isMermaidInteractive
+                    ? "click a Mermaid node to inspect its full source range"
+                    : "symbol click inspection is available on the original Mermaid view"}
+                </span>
+              </div>
+            ) : null}
+
+            {displayedPreviewText ? (
+              <MermaidDiagram
+                chart={displayedPreviewText}
+                interactiveSymbols={isMermaidInteractive ? previewSymbols : []}
+                selectedSymbolId={isMermaidInteractive ? selectedSymbol?.id || "" : ""}
+                isInteractive={isMermaidInteractive}
+                onSymbolSelect={onSymbolSelect}
+              />
+            ) : (
+              <pre className="preview-block">
+                click one Python module node to render its Mermaid flowchart here
+              </pre>
+            )}
+          </section>
+
+          {showCodePanel ? (
+            <div
+              className="preview-divider"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="resize preview panels"
+              onPointerDown={handlePreviewDividerPointerDown}
+            />
+          ) : null}
+
+          {showCodePanel ? (
+            <section className="preview-section">
+              <div className="preview-section-strip">
+                <div className="strip-left">
+                  <strong>selected source</strong>
+                  <span className={`symbol-kind-badge symbol-kind-${selectedSymbol.kind}`}>{selectedSymbol.kind}</span>
+                  <span className="preview-path">{selectedSymbol.title}</span>
+                </div>
+                <span className="status muted">
+                  lines {selectedSymbol.line}-{selectedSymbol.line_end || selectedSymbol.line}
+                </span>
+              </div>
+
+              <div className="symbol-detail-card">
+                <span className="status muted">{selectedSymbol.summary || "No summary."}</span>
+              </div>
+
+              <div className="preview-block symbol-source-block">
+                <CodeBlockView rows={selectedSymbolCodeRows} />
+              </div>
+            </section>
+          ) : null}
+        </div>
       </div>
     </section>
   );

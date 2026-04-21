@@ -7,6 +7,7 @@ import argparse
 import ast
 import html
 import json
+import re
 import subprocess
 from collections import Counter
 from dataclasses import dataclass
@@ -55,6 +56,10 @@ GIT_STATUS_META = {
     "untracked": {"code": "U", "label": "untracked", "priority": 0},
 }
 
+HUNK_HEADER_RE = re.compile(
+    r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Stats:
@@ -80,7 +85,16 @@ def main() -> None:
 def build_tree_payload(repo_root: str | Path) -> dict:
     repo_root_path = Path(repo_root).resolve()
     exact_git_status, directory_git_status = _collect_git_status(repo_root_path)
-    nodes = [_build_directory_node(repo_root_path, repo_root_path.name, exact_git_status, directory_git_status)]
+    python_source_git_info = _collect_python_source_git_info(repo_root_path, exact_git_status)
+    nodes = [
+        _build_directory_node(
+            repo_root_path,
+            repo_root_path.name,
+            exact_git_status,
+            directory_git_status,
+            python_source_git_info,
+        )
+    ]
     stats = _count_stats(nodes)
     return {
         "meta": {
@@ -99,12 +113,14 @@ def _build_directory_node(
     repo_name: str,
     exact_git_status: dict[str, dict],
     directory_git_status: dict[str, dict],
+    python_source_git_info: dict[str, dict],
 ) -> dict:
     children = _build_directory_children(
         path,
         repo_root=path,
         exact_git_status=exact_git_status,
         directory_git_status=directory_git_status,
+        python_source_git_info=python_source_git_info,
     )
     node = {
         "id": f"directory::{repo_name}",
@@ -126,6 +142,7 @@ def _build_directory_children(
     repo_root: Path,
     exact_git_status: dict[str, dict],
     directory_git_status: dict[str, dict],
+    python_source_git_info: dict[str, dict],
 ) -> list[dict]:
     children: list[dict] = []
     for entry in sorted(_iter_entries(directory), key=lambda item: (not item.is_dir(), item.name.lower())):
@@ -137,6 +154,7 @@ def _build_directory_children(
                 repo_root=repo_root,
                 exact_git_status=exact_git_status,
                 directory_git_status=directory_git_status,
+                python_source_git_info=python_source_git_info,
             )
             if not nested_children:
                 continue
@@ -161,7 +179,14 @@ def _build_directory_children(
 
         relative_path = entry.relative_to(repo_root).as_posix()
         if entry.suffix == ".py":
-            children.append(_build_python_module_node(entry, relative_path, exact_git_status))
+            children.append(
+                _build_python_module_node(
+                    entry,
+                    relative_path,
+                    exact_git_status,
+                    python_source_git_info.get(relative_path),
+                )
+            )
         else:
             node = {
                 "id": f"file::{relative_path}",
@@ -193,8 +218,14 @@ def _should_skip_directory(path: Path) -> bool:
     return False
 
 
-def _build_python_module_node(path: Path, relative_path: str, exact_git_status: dict[str, dict]) -> dict:
+def _build_python_module_node(
+    path: Path,
+    relative_path: str,
+    exact_git_status: dict[str, dict],
+    source_git_info: dict | None,
+) -> dict:
     source = path.read_text(encoding="utf-8")
+    source_lines = source.splitlines()
     try:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError as exc:
@@ -234,7 +265,16 @@ def _build_python_module_node(path: Path, relative_path: str, exact_git_status: 
         "path": relative_path,
         "summary": module_doc or "Python module",
         "line": 1,
+        "line_end": max(1, len(source_lines)),
         "child_count": len(classes) + len(functions),
+        "source_text": source,
+        "symbol_nodes": _build_module_symbol_nodes(
+            module_path=relative_path,
+            module_doc=module_doc,
+            classes=classes,
+            functions=functions,
+            source_line_count=max(1, len(source_lines)),
+        ),
         "symbol_mermaid": _render_module_symbol_mermaid(
             module_path=relative_path,
             module_doc=module_doc,
@@ -252,6 +292,16 @@ def _build_python_module_node(path: Path, relative_path: str, exact_git_status: 
     module_git_status = exact_git_status.get(relative_path)
     if module_git_status:
         node["git_status"] = module_git_status
+        if module_git_status["kind"] == "untracked":
+            node["source_git_info"] = {
+                "current": [
+                    {"line": line_number, "kind": "added"}
+                    for line_number in range(1, max(1, len(source_lines)) + 1)
+                ],
+                "deleted": [],
+            }
+        elif source_git_info:
+            node["source_git_info"] = source_git_info
     return node
 
 
@@ -420,6 +470,99 @@ def _build_directory_git_status(counter: Counter[str]) -> dict:
     }
 
 
+def _collect_python_source_git_info(repo_root: Path, exact_git_status: dict[str, dict]) -> dict[str, dict]:
+    source_git_info: dict[str, dict] = {}
+
+    for relative_path, git_status in exact_git_status.items():
+        if Path(relative_path).suffix != ".py":
+            continue
+        if git_status["kind"] == "untracked":
+            continue
+
+        diff_info = _build_source_git_info_from_diff(repo_root, relative_path)
+        if diff_info["current"] or diff_info["deleted"]:
+            source_git_info[relative_path] = diff_info
+
+    return source_git_info
+
+
+def _build_source_git_info_from_diff(repo_root: Path, relative_path: str) -> dict:
+    try:
+        diff_text = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                "--unified=0",
+                "HEAD",
+                "--",
+                relative_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return {"current": [], "deleted": []}
+
+    return _parse_source_git_info_from_patch(diff_text)
+
+
+def _parse_source_git_info_from_patch(diff_text: str) -> dict:
+    current: list[dict] = []
+    deleted: list[dict] = []
+    old_line = 0
+    new_line = 0
+    current_kind: str | None = None
+
+    for line in diff_text.splitlines():
+        hunk_match = HUNK_HEADER_RE.match(line)
+        if hunk_match:
+            old_start = int(hunk_match.group("old_start"))
+            old_count = int(hunk_match.group("old_count") or "1")
+            new_start = int(hunk_match.group("new_start"))
+            new_count = int(hunk_match.group("new_count") or "1")
+            old_line = old_start
+            new_line = new_start
+
+            if old_count == 0 and new_count > 0:
+                current_kind = "added"
+            elif old_count > 0 and new_count > 0:
+                current_kind = "modified"
+            else:
+                current_kind = None
+            continue
+
+        if line.startswith("---") or line.startswith("+++") or line.startswith("diff --git") or line.startswith("index "):
+            continue
+
+        if line.startswith("-"):
+            deleted.append(
+                {
+                    "before_line": new_line,
+                    "old_line": old_line,
+                    "text": line[1:],
+                }
+            )
+            old_line += 1
+            continue
+
+        if line.startswith("+"):
+            if current_kind is not None:
+                current.append({"line": new_line, "kind": current_kind})
+            new_line += 1
+            continue
+
+        if line.startswith(" "):
+            old_line += 1
+            new_line += 1
+
+    return {"current": current, "deleted": deleted}
+
+
 def _render_parse_error_mermaid(module_path: str, error_message: str) -> str:
     module_label = _build_mermaid_label(module_path, "Python module")
     error_label = _build_mermaid_label("Parse error", error_message)
@@ -433,6 +576,72 @@ def _render_parse_error_mermaid(module_path: str, error_message: str) -> str:
             "    module --> parse_error",
         ]
     )
+
+
+def _build_module_symbol_nodes(
+    *,
+    module_path: str,
+    module_doc: str | None,
+    classes: list[ast.ClassDef],
+    functions: list[ast.FunctionDef | ast.AsyncFunctionDef],
+    source_line_count: int,
+) -> list[dict]:
+    symbol_nodes: list[dict] = [
+        {
+            "id": "module",
+            "kind": "module",
+            "title": module_path,
+            "summary": module_doc or "Python module",
+            "line": 1,
+            "line_end": source_line_count,
+        }
+    ]
+
+    for class_index, class_node in enumerate(classes):
+        class_id = f"class_{class_index}"
+        symbol_nodes.append(
+            {
+                "id": class_id,
+                "kind": "class",
+                "title": _render_class_title(class_node),
+                "summary": _first_line(ast.get_docstring(class_node)) or "No docstring.",
+                "line": class_node.lineno,
+                "line_end": _node_end_lineno(class_node),
+                "parent_id": "module",
+            }
+        )
+
+        methods = [
+            child for child in class_node.body
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        for method_index, method_node in enumerate(methods):
+            symbol_nodes.append(
+                {
+                    "id": f"{class_id}_method_{method_index}",
+                    "kind": "method",
+                    "title": _render_function_title(method_node),
+                    "summary": _first_line(ast.get_docstring(method_node)) or "No docstring.",
+                    "line": method_node.lineno,
+                    "line_end": _node_end_lineno(method_node),
+                    "parent_id": class_id,
+                }
+            )
+
+    for function_index, function_node in enumerate(functions):
+        symbol_nodes.append(
+            {
+                "id": f"function_{function_index}",
+                "kind": "function",
+                "title": _render_function_title(function_node),
+                "summary": _first_line(ast.get_docstring(function_node)) or "No docstring.",
+                "line": function_node.lineno,
+                "line_end": _node_end_lineno(function_node),
+                "parent_id": "module",
+            }
+        )
+
+    return symbol_nodes
 
 
 def _render_parse_error_outline_xml(module_path: str, error_message: str) -> str:
@@ -640,6 +849,14 @@ def _safe_unparse(node: ast.AST) -> str:
         return ast.unparse(node)
     except Exception:
         return "..."
+
+
+def _node_end_lineno(node: ast.AST) -> int:
+    end_lineno = getattr(node, "end_lineno", None)
+    if isinstance(end_lineno, int) and end_lineno >= 1:
+        return end_lineno
+    lineno = getattr(node, "lineno", 1)
+    return lineno if isinstance(lineno, int) and lineno >= 1 else 1
 
 
 def _escape_mermaid_html_text(value: str) -> str:

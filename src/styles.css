@@ -458,6 +458,22 @@ select {
   padding: 12px;
 }
 
+.preview-workspace {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+  gap: 10px;
+}
+
+.preview-workspace.has-code-panel {
+  gap: 0;
+}
+
+.preview-workspace.is-resizing {
+  cursor: row-resize;
+}
+
 .tree-panel-collapsed {
   justify-content: center;
   align-items: stretch;
@@ -509,6 +525,121 @@ select {
   padding: 0 4px;
 }
 
+.symbol-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(19, 32, 45, 0.78);
+}
+
+.symbol-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.symbol-kind-module {
+  background: rgba(243, 238, 226, 0.14);
+  color: #efd9b1;
+}
+
+.symbol-kind-class {
+  background: rgba(141, 183, 255, 0.16);
+  color: #a8cbff;
+}
+
+.symbol-kind-function {
+  background: rgba(129, 184, 139, 0.16);
+  color: #9be0a4;
+}
+
+.symbol-kind-method {
+  background: rgba(226, 192, 141, 0.16);
+  color: #f0c58f;
+}
+
+.symbol-source-block {
+  min-height: 0;
+  height: 100%;
+  margin-top: 0;
+  padding: 0;
+}
+
+.code-view {
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  font: 0.9rem/1.55 "Iosevka Term", "SFMono-Regular", "Consolas", monospace;
+}
+
+.code-row {
+  display: grid;
+  grid-template-columns: 22px 58px minmax(0, 1fr);
+  align-items: start;
+  min-width: max-content;
+}
+
+.code-row-context {
+  background: transparent;
+}
+
+.code-row-added {
+  background: rgba(129, 184, 139, 0.08);
+}
+
+.code-row-modified {
+  background: rgba(226, 192, 141, 0.08);
+}
+
+.code-row-deleted {
+  background: rgba(199, 78, 57, 0.1);
+}
+
+.code-git-marker,
+.code-line-number {
+  padding: 0 10px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.code-git-marker {
+  font-weight: 700;
+  text-align: center;
+}
+
+.code-git-marker-added {
+  color: #81b88b;
+}
+
+.code-git-marker-modified {
+  color: #e2c08d;
+}
+
+.code-git-marker-deleted {
+  color: #e4676b;
+}
+
+.code-line-number {
+  text-align: right;
+  border-right: 1px solid var(--line);
+}
+
+.code-line-text {
+  display: block;
+  padding: 0 12px;
+  color: var(--text);
+  white-space: pre;
+}
+
 .preview-block {
   margin: 0;
   padding: 16px;
@@ -539,12 +670,81 @@ select {
   padding: 16px;
 }
 
+.preview-divider {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  cursor: row-resize;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.preview-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(89, 210, 193, 0.14) 0%,
+    rgba(145, 170, 197, 0.3) 50%,
+    rgba(89, 210, 193, 0.14) 100%
+  );
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+.preview-divider:hover::before,
+.preview-workspace.is-resizing .preview-divider::before {
+  background: linear-gradient(
+    90deg,
+    rgba(89, 210, 193, 0.26) 0%,
+    rgba(145, 170, 197, 0.5) 50%,
+    rgba(89, 210, 193, 0.26) 100%
+  );
+  box-shadow: 0 0 0 1px rgba(89, 210, 193, 0.16);
+}
+
 .diagram-error {
   margin: 0 0 8px;
 }
 
 .mermaid-diagram {
   min-width: fit-content;
+}
+
+.mermaid-diagram g.interactive-symbol-node {
+  cursor: pointer;
+}
+
+.mermaid-diagram g.interactive-symbol-node .label-container,
+.mermaid-diagram g.interactive-symbol-node .outer-path,
+.mermaid-diagram g.interactive-symbol-node rect.basic,
+.mermaid-diagram g.interactive-symbol-node polygon.basic,
+.mermaid-diagram g.interactive-symbol-node path.basic {
+  transition: filter 120ms ease, stroke-width 120ms ease, opacity 120ms ease;
+}
+
+.mermaid-diagram g.interactive-symbol-node:hover .label-container,
+.mermaid-diagram g.interactive-symbol-node:hover .outer-path,
+.mermaid-diagram g.interactive-symbol-node:hover rect.basic,
+.mermaid-diagram g.interactive-symbol-node:hover polygon.basic,
+.mermaid-diagram g.interactive-symbol-node:hover path.basic {
+  filter: brightness(1.08);
+  stroke-width: 2px;
+}
+
+.mermaid-diagram g.selected-symbol-node .label-container,
+.mermaid-diagram g.selected-symbol-node .outer-path,
+.mermaid-diagram g.selected-symbol-node rect.basic,
+.mermaid-diagram g.selected-symbol-node polygon.basic,
+.mermaid-diagram g.selected-symbol-node path.basic {
+  filter: drop-shadow(0 0 10px rgba(89, 210, 193, 0.22));
+  stroke: #59d2c1;
+  stroke-width: 2.4px;
+}
+
+.mermaid-diagram g.interactive-symbol-disabled {
+  cursor: default;
 }
 
 .mermaid-diagram svg {
@@ -620,5 +820,9 @@ select {
 
   .preview-block {
     min-height: 220px;
+  }
+
+  .preview-workspace.has-code-panel {
+    grid-template-rows: minmax(240px, 1fr) 10px minmax(220px, 1fr) !important;
   }
 }

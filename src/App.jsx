@@ -4,6 +4,7 @@ import PreviewPanel from "./components/PreviewPanel";
 import RepoTreePanel from "./components/RepoTreePanel";
 import { useTreeViewportHeight } from "./hooks/useTreeViewportHeight";
 import { TRANSLATE_API_BASE_URL, copyText, fetchJson, logClient } from "./lib/api";
+import { buildCodeRowsForSelectedSymbol } from "./lib/codeView";
 import {
   collapseFromDeepestVisibleLevel,
   collectInternalNodeDepths,
@@ -39,6 +40,10 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [previewText, setPreviewText] = useState("");
   const [previewPath, setPreviewPath] = useState("");
+  const [previewSourceText, setPreviewSourceText] = useState("");
+  const [previewSourceGitInfo, setPreviewSourceGitInfo] = useState({ current: [], deleted: [] });
+  const [previewSymbols, setPreviewSymbols] = useState([]);
+  const [selectedPreviewSymbolId, setSelectedPreviewSymbolId] = useState("");
   const [copyStatus, setCopyStatus] = useState(null);
   const [translationText, setTranslationText] = useState("");
   const [translationError, setTranslationError] = useState("");
@@ -81,6 +86,15 @@ export default function App() {
     [visibleTreeNodes],
   );
   const treeViewportHeight = useTreeViewportHeight(treeViewportRef, [isBooting, treePayload]);
+  const selectedPreviewSymbol = useMemo(
+    () => previewSymbols.find((symbol) => symbol.id === selectedPreviewSymbolId) ?? null,
+    [previewSymbols, selectedPreviewSymbolId],
+  );
+  const selectedPreviewSymbolCodeRows = useMemo(
+    () => buildCodeRowsForSelectedSymbol(previewSourceText, previewSourceGitInfo, selectedPreviewSymbol),
+    [previewSourceGitInfo, previewSourceText, selectedPreviewSymbol],
+  );
+  const isMermaidInteractive = previewMode === "original" && previewSymbols.length > 0;
 
   function syncTreeBrowseDepth() {
     const tree = treeApiRef.current;
@@ -218,6 +232,10 @@ export default function App() {
       setTreeBrowseDepth(0);
       setPreviewText("");
       setPreviewPath("");
+      setPreviewSourceText("");
+      setPreviewSourceGitInfo({ current: [], deleted: [] });
+      setPreviewSymbols([]);
+      setSelectedPreviewSymbolId("");
       setCopyStatus(null);
       resetTranslation();
     } catch (error) {
@@ -240,6 +258,10 @@ export default function App() {
       setTreeBrowseDepth(0);
       setPreviewText("");
       setPreviewPath("");
+      setPreviewSourceText("");
+      setPreviewSourceGitInfo({ current: [], deleted: [] });
+      setPreviewSymbols([]);
+      setSelectedPreviewSymbolId("");
       setCopyStatus(null);
       resetTranslation();
       return;
@@ -262,6 +284,10 @@ export default function App() {
       setTreeBrowseDepth(0);
       setPreviewText("");
       setPreviewPath("");
+      setPreviewSourceText("");
+      setPreviewSourceGitInfo({ current: [], deleted: [] });
+      setPreviewSymbols([]);
+      setSelectedPreviewSymbolId("");
       setCopyStatus({
         kind: "success",
         message: `remembered ${nextRepoRoot.split("/").at(-1)}`,
@@ -293,8 +319,15 @@ export default function App() {
   async function handleModuleActivate(node) {
     const mermaidText = node.data.symbol_mermaid || "";
     const xmlOutlineText = node.data.symbol_outline_xml || "";
+    const sourceText = node.data.source_text || "";
+    const sourceGitInfo = node.data.source_git_info || { current: [], deleted: [] };
+    const symbolNodes = node.data.symbol_nodes || [];
     setPreviewText(mermaidText);
     setPreviewPath(node.data.path);
+    setPreviewSourceText(sourceText);
+    setPreviewSourceGitInfo(sourceGitInfo);
+    setPreviewSymbols(symbolNodes);
+    setSelectedPreviewSymbolId(symbolNodes[0]?.id || "");
     resetTranslation();
     logClient("module.activate", {
       nodeId: node.id,
@@ -478,6 +511,14 @@ export default function App() {
     });
   }
 
+  function handlePreviewSymbolSelect(symbolId) {
+    setSelectedPreviewSymbolId(symbolId);
+    logClient("preview.symbol.select", {
+      previewPath,
+      symbolId: symbolId || "",
+    });
+  }
+
   function handlePanelResizeStart(event) {
     if (isTreeCollapsed) {
       return;
@@ -557,13 +598,18 @@ export default function App() {
           previewText={previewText}
           displayedPreviewText={orientedPreviewText}
           previewPath={previewPath}
+          selectedSymbolCodeRows={selectedPreviewSymbolCodeRows}
+          previewSymbols={previewSymbols}
+          selectedSymbol={selectedPreviewSymbol}
           copyStatus={copyStatus}
           translationError={translationError}
           translationModel={translationModel}
           isTranslating={isTranslating}
           isShowingTranslated={previewMode === "translated" && Boolean(translationText)}
+          isMermaidInteractive={isMermaidInteractive}
           mermaidDirection={mermaidDirection}
           onMermaidDirectionChange={handleMermaidDirectionChange}
+          onSymbolSelect={handlePreviewSymbolSelect}
           onTranslate={() => void handleTranslatePreview()}
         />
       </div>
