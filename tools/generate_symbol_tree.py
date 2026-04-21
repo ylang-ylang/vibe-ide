@@ -160,17 +160,21 @@ def _build_python_module_node(path: Path, relative_path: str) -> dict:
             "line": exc.lineno or 1,
             "child_count": 0,
             "symbol_mermaid": _render_parse_error_mermaid(relative_path, exc.msg),
+            "symbol_outline_xml": _render_parse_error_outline_xml(relative_path, exc.msg),
         }
 
     module_doc = _first_line(ast.get_docstring(tree))
     classes: list[ast.ClassDef] = []
     functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    main_guard: ast.If | None = None
 
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
             classes.append(node)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             functions.append(node)
+        elif _is_main_guard(node):
+            main_guard = node
 
     return {
         "id": f"module::{relative_path}",
@@ -185,6 +189,13 @@ def _build_python_module_node(path: Path, relative_path: str) -> dict:
             module_doc=module_doc,
             classes=classes,
             functions=functions,
+        ),
+        "symbol_outline_xml": _render_module_outline_xml(
+            module_path=relative_path,
+            module_doc=module_doc,
+            classes=classes,
+            functions=functions,
+            main_guard=main_guard,
         ),
     }
 
@@ -228,6 +239,18 @@ def _render_parse_error_mermaid(module_path: str, error_message: str) -> str:
             f'    module["{module_label}"]:::moduleNode',
             f'    parse_error["{error_label}"]:::errorNode',
             "    module --> parse_error",
+        ]
+    )
+
+
+def _render_parse_error_outline_xml(module_path: str, error_message: str) -> str:
+    return "\n".join(
+        [
+            "<module_outline>",
+            f"  <path>{_xml_text(module_path)}</path>",
+            "  <module_summary>Python module with parse error.</module_summary>",
+            f"  <parse_error>{_xml_text(error_message)}</parse_error>",
+            "</module_outline>",
         ]
     )
 
@@ -293,6 +316,101 @@ def _render_module_symbol_mermaid(
     return "\n".join(lines)
 
 
+def _render_module_outline_xml(
+    *,
+    module_path: str,
+    module_doc: str | None,
+    classes: list[ast.ClassDef],
+    functions: list[ast.FunctionDef | ast.AsyncFunctionDef],
+    main_guard: ast.If | None,
+) -> str:
+    lines: list[str] = [
+        "<module_outline>",
+        f"  <path>{_xml_text(module_path)}</path>",
+        f"  <module_summary>{_xml_text(module_doc or 'Python module')}</module_summary>",
+    ]
+
+    lines.append("  <classes>")
+    for class_node in classes:
+        lines.extend(_render_class_outline_xml(class_node, indent="    "))
+    lines.append("  </classes>")
+
+    lines.append("  <functions>")
+    for function_node in functions:
+        lines.extend(_render_function_outline_xml(function_node, indent="    ", tag_name="function"))
+    lines.append("  </functions>")
+
+    if main_guard is not None:
+        lines.extend(_render_main_guard_outline_xml(main_guard, indent="  "))
+
+    lines.append("</module_outline>")
+    return "\n".join(lines)
+
+
+def _render_main_guard_outline_xml(main_guard: ast.If, *, indent: str) -> list[str]:
+    classes = [
+        node for node in main_guard.body
+        if isinstance(node, ast.ClassDef)
+    ]
+    functions = [
+        node for node in main_guard.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+
+    lines = [
+        f'{indent}<main_guard condition="__name__ == \'__main__\'">',
+        f"{indent}  <classes>",
+    ]
+    for class_node in classes:
+        lines.extend(_render_class_outline_xml(class_node, indent=f"{indent}    "))
+    lines.append(f"{indent}  </classes>")
+
+    lines.append(f"{indent}  <functions>")
+    for function_node in functions:
+        lines.extend(_render_function_outline_xml(function_node, indent=f"{indent}    ", tag_name="function"))
+    lines.append(f"{indent}  </functions>")
+    lines.append(f"{indent}</main_guard>")
+    return lines
+
+
+def _render_class_outline_xml(class_node: ast.ClassDef, *, indent: str) -> list[str]:
+    lines = [
+        f"{indent}<class>",
+        f"{indent}  <signature>{_xml_text(_render_class_title(class_node))}</signature>",
+        f"{indent}  <summary>{_xml_text(_first_line(ast.get_docstring(class_node)) or 'No docstring.')}</summary>",
+        f"{indent}  <methods>",
+    ]
+
+    methods = [
+        child for child in class_node.body
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    for method_node in methods:
+        lines.extend(_render_function_outline_xml(method_node, indent=f"{indent}    ", tag_name="method"))
+
+    lines.extend(
+        [
+            f"{indent}  </methods>",
+            f"{indent}</class>",
+        ]
+    )
+    return lines
+
+
+def _render_function_outline_xml(
+    function_node: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    indent: str,
+    tag_name: str,
+) -> list[str]:
+    return [
+        f"{indent}<{tag_name}>",
+        f"{indent}  <signature>{_xml_text(_render_function_title(function_node))}</signature>",
+        f"{indent}  <summary>{_xml_text(_first_line(ast.get_docstring(function_node)) or 'No docstring.')}</summary>",
+        f"{indent}</{tag_name}>",
+    ]
+
+
 def _render_class_title(class_node: ast.ClassDef) -> str:
     if not class_node.bases:
         return f"class {class_node.name}"
@@ -343,6 +461,28 @@ def _build_mermaid_label(title: str, summary: str | None = None) -> str:
         for line in lines
     ]
     return "<br/>".join(escaped_lines)
+
+
+def _xml_text(value: str) -> str:
+    return html.escape(value, quote=False)
+
+
+def _is_main_guard(node: ast.AST) -> bool:
+    if not isinstance(node, ast.If):
+        return False
+
+    test = node.test
+    if not isinstance(test, ast.Compare):
+        return False
+    if len(test.ops) != 1 or len(test.comparators) != 1:
+        return False
+    if not isinstance(test.ops[0], ast.Eq):
+        return False
+    if not isinstance(test.left, ast.Name) or test.left.id != "__name__":
+        return False
+
+    comparator = test.comparators[0]
+    return isinstance(comparator, ast.Constant) and comparator.value == "__main__"
 
 
 if __name__ == "__main__":

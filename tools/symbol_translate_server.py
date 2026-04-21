@@ -45,11 +45,13 @@ class TranslationState:
                 {
                     "role": "system",
                     "content": (
-                        "Translate the user's Mermaid flowchart for one Python module into concise Simplified Chinese. "
+                        "Translate the user's Mermaid flowchart for one Python module into Simplified Chinese and return valid Mermaid only. "
                         "Use only the provided Mermaid flowchart as source context. "
-                        "Describe module path, classes, functions, methods, and docstring summaries only when they are explicitly present. "
-                        "Do not infer code details that are not present. "
-                        "Keep the original hierarchy when practical."
+                        "Preserve the graph direction, node ids, classDef lines, edge structure, and Mermaid syntax. "
+                        "Translate only the human-readable node labels into Simplified Chinese. "
+                        "Preserve HTML line breaks like <br/> when present. "
+                        "Do not add markdown fences, explanations, or extra prose. "
+                        "Do not infer code details that are not present."
                     ),
                 },
                 {

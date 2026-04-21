@@ -334,9 +334,8 @@ select {
 }
 
 .preview-content {
-  display: grid;
-  grid-template-rows: minmax(220px, 1fr) minmax(220px, 1fr);
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   flex: 1;
   padding: 12px;
@@ -429,7 +428,7 @@ select {
   }
 
   .preview-content {
-    grid-template-rows: minmax(220px, 1fr) minmax(220px, 1fr);
+    min-height: 220px;
   }
 
   .preview-block {

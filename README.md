@@ -3,8 +3,8 @@
 Interactive repository tree for Python-heavy codebases.
 
 This tool scans a repository with Python `ast`, builds a compact tree, and lets you click one
-`.py` file to generate and copy a Mermaid module flowchart based on module, class, function, method,
-and docstring first-line data.
+`.py` file to preview a Mermaid module flowchart and copy an XML outline based on module, class,
+function, method, and docstring first-line data.
 
 ## Run
 
@@ -106,7 +106,7 @@ python3 tools/generate_symbol_tree.py \
 - Top-level class and function extraction
 - Class method extraction
 - Docstring first-line summaries
-- Click-to-copy Mermaid module flowchart for `.py` files
+- Click-to-copy XML module outline for `.py` files while previewing Mermaid flowcharts
 - AI translation that sends only the current Mermaid flowchart to a separate local translator service
 - Repo root selection from the current user's home directory
 - On-disk memory for the last selected repo root
