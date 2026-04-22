@@ -5,10 +5,59 @@ import MermaidDiagram from "./MermaidDiagram";
 
 function CopyStatus({ copyStatus }) {
   if (!copyStatus) {
-    return <span className="status muted">click one file to preview source; `.py` also shows Mermaid + XML outline</span>;
+    return null;
   }
 
   return <span className={`status ${copyStatus.kind}`}>{copyStatus.message}</span>;
+}
+
+function MermaidOverlayControls({
+  copyStatus,
+  buttonLabel,
+  isTranslating,
+  mermaidDirection,
+  translationError,
+  translationStatus,
+  onMermaidDirectionChange,
+  onTranslate,
+}) {
+  const overlayStatus = copyStatus
+    ? <CopyStatus copyStatus={copyStatus} />
+    : <span className={`status ${translationError ? "error" : "muted"}`}>{translationStatus}</span>;
+
+  return (
+    <div className="mermaid-overlay-toolbar">
+      <div className="mermaid-overlay-button-row">
+        <div className="action-button-group" role="group" aria-label="mermaid direction">
+          <button
+            type="button"
+            className={`action-button ${mermaidDirection === "LR" ? "is-active" : ""}`}
+            onClick={() => onMermaidDirectionChange("LR")}
+          >
+            LR
+          </button>
+          <button
+            type="button"
+            className={`action-button ${mermaidDirection === "TD" ? "is-active" : ""}`}
+            onClick={() => onMermaidDirectionChange("TD")}
+          >
+            TD
+          </button>
+        </div>
+        <button
+          type="button"
+          className="action-button"
+          onClick={onTranslate}
+          disabled={isTranslating}
+        >
+          {buttonLabel}
+        </button>
+      </div>
+      <div className="mermaid-overlay-status">
+        {overlayStatus}
+      </div>
+    </div>
+  );
 }
 
 function getTranslateButtonLabel({ isTranslating, isShowingTranslated, translationModel }) {
@@ -163,35 +212,6 @@ export default function PreviewPanel({
           <strong>preview</strong>
           {previewPath ? <span className="preview-path">{previewPath}</span> : null}
         </div>
-        <div className="panel-actions">
-          <CopyStatus copyStatus={copyStatus} />
-          <div className="action-button-group" role="group" aria-label="mermaid direction">
-            <button
-              type="button"
-              className={`action-button ${mermaidDirection === "LR" ? "is-active" : ""}`}
-              onClick={() => onMermaidDirectionChange("LR")}
-              disabled={!showMermaidPanel}
-            >
-              LR
-            </button>
-            <button
-              type="button"
-              className={`action-button ${mermaidDirection === "TD" ? "is-active" : ""}`}
-              onClick={() => onMermaidDirectionChange("TD")}
-              disabled={!showMermaidPanel}
-            >
-              TD
-            </button>
-          </div>
-          <button
-            type="button"
-            className="action-button"
-            onClick={onTranslate}
-            disabled={!showMermaidPanel || isTranslating}
-          >
-            {buttonLabel}
-          </button>
-        </div>
       </div>
 
       <div className="preview-content">
@@ -204,20 +224,29 @@ export default function PreviewPanel({
             <section className="preview-section">
               <div className="preview-section-strip">
                 <strong>module flowchart</strong>
-                <span className={`status ${translationError ? "error" : "muted"}`}>
-                  {translationStatus}
-                </span>
               </div>
 
               {translationError ? <div className="error-banner">{translationError}</div> : null}
 
-              <MermaidDiagram
-                chart={displayedPreviewText}
-                interactiveSymbols={isMermaidInteractive ? previewSymbols : []}
-                selectedSymbolId={isMermaidInteractive ? selectedSymbol?.id || "" : ""}
-                isInteractive={isMermaidInteractive}
-                onSymbolSelect={onSymbolSelect}
-              />
+              <div className="mermaid-frame">
+                <MermaidDiagram
+                  chart={displayedPreviewText}
+                  interactiveSymbols={isMermaidInteractive ? previewSymbols : []}
+                  selectedSymbolId={isMermaidInteractive ? selectedSymbol?.id || "" : ""}
+                  isInteractive={isMermaidInteractive}
+                  onSymbolSelect={onSymbolSelect}
+                />
+                <MermaidOverlayControls
+                  copyStatus={copyStatus}
+                  buttonLabel={buttonLabel}
+                  isTranslating={isTranslating}
+                  mermaidDirection={mermaidDirection}
+                  translationError={translationError}
+                  translationStatus={translationStatus}
+                  onMermaidDirectionChange={onMermaidDirectionChange}
+                  onTranslate={onTranslate}
+                />
+              </div>
             </section>
 
             <div
@@ -274,9 +303,6 @@ export default function PreviewPanel({
           <section className="preview-section preview-section-full">
             <div className="preview-section-strip">
               <strong>module flowchart</strong>
-              <span className={`status ${translationError ? "error" : "muted"}`}>
-                {translationStatus}
-              </span>
             </div>
 
             {translationError ? <div className="error-banner">{translationError}</div> : null}
@@ -289,13 +315,25 @@ export default function PreviewPanel({
               </span>
             </div>
 
-            <MermaidDiagram
-              chart={displayedPreviewText}
-              interactiveSymbols={isMermaidInteractive ? previewSymbols : []}
-              selectedSymbolId={isMermaidInteractive ? selectedSymbol?.id || "" : ""}
-              isInteractive={isMermaidInteractive}
-              onSymbolSelect={onSymbolSelect}
-            />
+            <div className="mermaid-frame">
+              <MermaidDiagram
+                chart={displayedPreviewText}
+                interactiveSymbols={isMermaidInteractive ? previewSymbols : []}
+                selectedSymbolId={isMermaidInteractive ? selectedSymbol?.id || "" : ""}
+                isInteractive={isMermaidInteractive}
+                onSymbolSelect={onSymbolSelect}
+              />
+              <MermaidOverlayControls
+                copyStatus={copyStatus}
+                buttonLabel={buttonLabel}
+                isTranslating={isTranslating}
+                mermaidDirection={mermaidDirection}
+                translationError={translationError}
+                translationStatus={translationStatus}
+                onMermaidDirectionChange={onMermaidDirectionChange}
+                onTranslate={onTranslate}
+              />
+            </div>
           </section>
         ) : showRawSourcePanel ? (
           <section className="preview-section preview-section-full">

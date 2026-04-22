@@ -10,12 +10,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MATCH_PATTERNS = (
-    f"{REPO_ROOT}/tools/app_server.py",
-    f"{REPO_ROOT}/tools/symbol_translate_server.py",
-    f"{REPO_ROOT}/node_modules/.bin/vite",
-    "tools/app_server.py",
-    "tools/symbol_translate_server.py",
-    "node ./node_modules/.bin/vite",
+    f"{REPO_ROOT}/backend/app_server.py",
+    f"{REPO_ROOT}/backend/symbol_translate_server.py",
+    f"{REPO_ROOT}/frontend/node_modules/.bin/vite",
+    "backend/app_server.py",
+    "backend/symbol_translate_server.py",
+    "node ./frontend/node_modules/.bin/vite",
+    "node_modules/.bin/vite",
     "./node_modules/.bin/vite",
 )
 

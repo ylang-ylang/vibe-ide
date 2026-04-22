@@ -1,5 +1,8 @@
 node_modules/
 dist/
 public/tree-data.json
-tools/__pycache__/
+frontend/node_modules/
+frontend/dist/
+frontend/public/tree-data.json
+__pycache__/
 .tmp/

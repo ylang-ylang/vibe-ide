@@ -179,6 +179,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    function syncAppViewportHeight() {
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty("--app-viewport-height", `${Math.round(viewportHeight)}px`);
+    }
+
+    syncAppViewportHeight();
+
+    window.addEventListener("resize", syncAppViewportHeight);
+    window.visualViewport?.addEventListener("resize", syncAppViewportHeight);
+    window.visualViewport?.addEventListener("scroll", syncAppViewportHeight);
+
+    return () => {
+      window.removeEventListener("resize", syncAppViewportHeight);
+      window.visualViewport?.removeEventListener("resize", syncAppViewportHeight);
+      window.visualViewport?.removeEventListener("scroll", syncAppViewportHeight);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!treePayload || treeViewportHeight <= 0) {
       return undefined;
     }
@@ -450,7 +469,7 @@ export default function App() {
         if (pythonSymbolRequestIdRef.current === requestId) {
           setCopyStatus({
             kind: "success",
-            message: `copied XML outline for ${relativePath.split("/").at(-1)}`,
+            message: "xml copied",
           });
         }
       } catch {

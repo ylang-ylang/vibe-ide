@@ -29,7 +29,7 @@ function ensureMermaidInitialized() {
     },
     themeCSS: [
       ".symbol-title { font-weight: 700; }",
-      ".symbol-doc { font-style: italic; }",
+      ".symbol-doc { font-style: italic; font-weight: 400; }",
     ].join(" "),
     flowchart: {
       htmlLabels: true,

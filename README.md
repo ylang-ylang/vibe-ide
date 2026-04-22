@@ -1,14 +1,20 @@
-# Repo Symbol Tree
+# Comap
 
-Interactive repository tree for Python-heavy codebases.
+Interactive code map for Python-heavy codebases.
 
 This tool scans a repository with Python `ast`, builds a compact tree, and lets you click one
 file to preview source. For `.py` files it also renders a Mermaid module flowchart and copies an
 XML outline based on module, class, function, method, and docstring first-line data.
 
+## Layout
+
+- `frontend/`: Vite + React UI
+- `backend/`: local Python API server, translation server, and code outline payload builders
+
 ## Run
 
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
@@ -18,6 +24,7 @@ npm run dev
 If you already have an old dev session running and hit `Address already in use`, use:
 
 ```bash
+cd frontend
 npm run stop
 npm run dev
 ```
@@ -25,6 +32,7 @@ npm run dev
 or in one command:
 
 ```bash
+cd frontend
 npm run dev:fresh
 ```
 
@@ -40,15 +48,18 @@ Open the Vite URL in your browser. The UI will:
 - let you choose one repo root
 - remember the last selected repo root on disk
 
-The remembered selection is stored at:
+The remembered selection is currently stored at:
 
 ```bash
 ~/.config/repo-symbol-tree/state.json
 ```
 
+The on-disk state path has not been renamed yet.
+
 ## Build And Serve
 
 ```bash
+cd frontend
 npm run build
 npm run serve
 ```
@@ -64,7 +75,7 @@ Runtime flow:
 - frontend sends only the current Mermaid flowchart to the same-origin path `/translate-api`
 - in `npm run dev`, Vite proxies `/translate-api` to `127.0.0.1:8766`
 - in `npm run serve`, `app_server` proxies `/translate-api` to `127.0.0.1:8766`
-- `tools/symbol_translate_server.py` forwards that request to a local OpenAI-compatible proxy
+- `backend/symbol_translate_server.py` forwards that request to a local OpenAI-compatible proxy
 
 Default upstream target:
 
@@ -94,9 +105,9 @@ export VITE_TRANSLATE_API_BASE_URL=http://127.0.0.1:8766
 Generate a static tree payload for any repo root:
 
 ```bash
-python3 tools/generate_symbol_tree.py \
+python3 backend/generate_symbol_tree.py \
   --repo-root /path/to/repo \
-  --output public/tree-data.json
+  --output frontend/public/tree-data.json
 ```
 
 ## Current Scope

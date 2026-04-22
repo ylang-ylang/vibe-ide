@@ -2,10 +2,12 @@ html,
 body,
 #root {
   height: 100%;
+  overflow: hidden;
 }
 
 :root {
   color-scheme: dark;
+  --app-viewport-height: 100dvh;
   --bg: #071018;
   --panel: rgba(12, 20, 29, 0.92);
   --surface: #0e1822;
@@ -35,7 +37,7 @@ body,
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: var(--app-viewport-height);
   color: var(--text);
   background: var(--bg);
 }
@@ -47,14 +49,14 @@ select {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: var(--app-viewport-height);
 }
 
 .app-shell {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
-  min-height: 100dvh;
-  height: 100dvh;
+  min-height: var(--app-viewport-height);
+  height: var(--app-viewport-height);
   padding: 16px;
 }
 
@@ -140,12 +142,6 @@ select {
   align-items: center;
   gap: 12px;
   min-width: 0;
-}
-
-.panel-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 .strip input {
@@ -559,6 +555,56 @@ select {
   flex: 1;
 }
 
+.mermaid-frame {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.mermaid-overlay-toolbar {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(70%, 560px);
+  padding: 10px;
+  border: 1px solid rgba(145, 170, 197, 0.18);
+  border-radius: 14px;
+  background: rgba(7, 16, 24, 0.58);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
+  opacity: 0.72;
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+  pointer-events: none;
+}
+
+.mermaid-overlay-toolbar:hover,
+.mermaid-overlay-toolbar:focus-within {
+  opacity: 0.96;
+  background: rgba(7, 16, 24, 0.8);
+  border-color: rgba(145, 170, 197, 0.28);
+}
+
+.mermaid-overlay-button-row,
+.mermaid-overlay-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  pointer-events: auto;
+}
+
+.mermaid-overlay-status .status {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 0;
+}
+
 .preview-section-strip {
   display: flex;
   align-items: center;
@@ -881,7 +927,7 @@ select {
 
 @media (max-width: 1000px) {
   .app-shell {
-    min-height: 100dvh;
+    min-height: var(--app-viewport-height);
     height: auto;
   }
 

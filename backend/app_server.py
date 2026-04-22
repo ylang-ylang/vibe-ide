@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
-from generate_symbol_tree import (
+from code_outline import (
     EXCLUDED_DIRS,
     build_preview_payload,
     build_python_symbol_payload,

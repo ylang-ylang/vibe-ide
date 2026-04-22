@@ -1,33 +1,12 @@
 {
-  "name": "repo-symbol-tree",
+  "name": "comap",
   "private": true,
-  "version": "0.0.1",
-  "type": "module",
+  "version": "0.2.0",
   "scripts": {
-    "stop": "python3 tools/stop_dev_servers.py",
-    "dev:api": "python3 tools/app_server.py",
-    "dev:translate": "python3 tools/symbol_translate_server.py --host 0.0.0.0",
-    "dev:web": "./node_modules/.bin/vite",
-    "dev": "./node_modules/.bin/concurrently \"npm run dev:api\" \"npm run dev:translate\" \"npm run dev:web\"",
-    "dev:fresh": "python3 tools/stop_dev_servers.py && npm run dev",
-    "build": "./node_modules/.bin/vite build",
-    "serve:web": "python3 tools/app_server.py --static-dir dist",
-    "serve:translate": "python3 tools/symbol_translate_server.py --host 0.0.0.0",
-    "serve": "./node_modules/.bin/concurrently \"npm run serve:web\" \"npm run serve:translate\""
-  },
-  "dependencies": {
-    "@shikijs/core": "^4.0.2",
-    "@shikijs/engine-javascript": "^4.0.2",
-    "@shikijs/langs": "^4.0.2",
-    "@shikijs/themes": "^4.0.2",
-    "mermaid": "^11.14.0",
-    "react": "^19.2.0",
-    "react-arborist": "^3.4.3",
-    "react-dom": "^19.2.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^6.0.1",
-    "concurrently": "^9.2.1",
-    "vite": "^8.0.9"
+    "stop": "npm --prefix frontend run stop",
+    "dev": "npm --prefix frontend run dev",
+    "dev:fresh": "npm --prefix frontend run dev:fresh",
+    "build": "npm --prefix frontend run build",
+    "serve": "npm --prefix frontend run serve"
   }
 }
