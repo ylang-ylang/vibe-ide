@@ -7,6 +7,7 @@ import html
 from pathlib import Path
 
 from .common import build_source_signature, first_line, is_python_file, resolve_preview_target
+from .mermaid_blocks import load_mermaid_block_config
 
 
 def build_python_symbol_payload(repo_root: str | Path, relative_path: str) -> dict:
@@ -113,15 +114,15 @@ def _build_whole_file_symbol_node(
 
 
 def _render_parse_error_mermaid(module_path: str, error_message: str) -> str:
+    block_config = load_mermaid_block_config()
     module_label = _build_mermaid_label(module_path, "Python module")
     error_label = _build_mermaid_label("Parse error", error_message)
     return "\n".join(
         [
             "flowchart LR",
-            "    classDef moduleNode fill:#f3eee2,stroke:#8b6f47,stroke-width:1.5px,color:#1b1814;",
-            "    classDef errorNode fill:#fdeaea,stroke:#a12c2c,stroke-width:1.2px,color:#1b1814;",
-            f'    module["{module_label}"]:::moduleNode',
-            f'    parse_error["{error_label}"]:::errorNode',
+            *block_config.render_class_defs("module", "parse_error"),
+            *block_config.render_node_lines(node_id="module", label=module_label, semantic_role="module"),
+            *block_config.render_node_lines(node_id="parse_error", label=error_label, semantic_role="parse_error"),
             "    module --> parse_error",
         ]
     )
@@ -212,20 +213,25 @@ def _render_module_symbol_mermaid(
     classes: list[ast.ClassDef],
     functions: list[ast.FunctionDef | ast.AsyncFunctionDef],
 ) -> str:
+    block_config = load_mermaid_block_config()
     lines: list[str] = [
         "flowchart LR",
-        "    classDef moduleNode fill:#f3eee2,stroke:#8b6f47,stroke-width:1.5px,color:#1b1814;",
-        "    classDef classNode fill:#e8f1ff,stroke:#28569c,stroke-width:1.2px,color:#1b1814;",
-        "    classDef functionNode fill:#edf7ef,stroke:#0f704b,stroke-width:1.2px,color:#1b1814;",
-        "    classDef methodNode fill:#fff6e6,stroke:#a95c12,stroke-width:1.2px,color:#1b1814;",
-        "    classDef noteNode fill:#f8f7f4,stroke:#8a8175,stroke-dasharray: 4 4,color:#1b1814;",
+        *block_config.render_class_defs("module", "class", "function", "method", "empty"),
     ]
 
     module_label = _build_mermaid_label(module_path, module_doc or "Python module")
-    lines.append(f'    module["{module_label}"]:::moduleNode')
+    lines.extend(
+        block_config.render_node_lines(node_id="module", label=module_label, semantic_role="module")
+    )
 
     if not classes and not functions:
-        lines.append('    empty["No top-level classes or functions found."]:::noteNode')
+        lines.extend(
+            block_config.render_node_lines(
+                node_id="empty",
+                label="No top-level classes or functions found.",
+                semantic_role="empty",
+            )
+        )
         lines.append("    module --> empty")
         return "\n".join(lines)
 
@@ -235,7 +241,9 @@ def _render_module_symbol_mermaid(
             _render_class_title(class_node),
             first_line(ast.get_docstring(class_node)),
         )
-        lines.append(f'    {class_id}["{class_label}"]:::classNode')
+        lines.extend(
+            block_config.render_node_lines(node_id=class_id, label=class_label, semantic_role="class")
+        )
         lines.append(f"    module --> {class_id}")
 
         methods = [
@@ -251,7 +259,9 @@ def _render_module_symbol_mermaid(
                 _render_function_title(method_node),
                 first_line(ast.get_docstring(method_node)),
             )
-            lines.append(f'    {method_id}["{method_label}"]:::methodNode')
+            lines.extend(
+                block_config.render_node_lines(node_id=method_id, label=method_label, semantic_role="method")
+            )
             lines.append(f"    {class_id} --> {method_id}")
 
     for function_index, function_node in enumerate(functions):
@@ -260,7 +270,13 @@ def _render_module_symbol_mermaid(
             _render_function_title(function_node),
             first_line(ast.get_docstring(function_node)),
         )
-        lines.append(f'    {function_id}["{function_label}"]:::functionNode')
+        lines.extend(
+            block_config.render_node_lines(
+                node_id=function_id,
+                label=function_label,
+                semantic_role="function",
+            )
+        )
         lines.append(f"    module --> {function_id}")
 
     return "\n".join(lines)

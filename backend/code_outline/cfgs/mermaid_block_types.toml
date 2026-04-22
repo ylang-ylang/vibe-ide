@@ -1,0 +1,63 @@
+# Mermaid block types for Python symbol flowcharts.
+# `semantic_roles` maps backend semantic node roles to Mermaid block types.
+# `block_types` defines the concrete Mermaid `classDef` styles.
+
+render_order = [
+  "moduleNode",
+  "classNode",
+  "functionNode",
+  "methodNode",
+  "noteNode",
+  "errorNode",
+]
+
+[semantic_roles]
+module = "moduleNode"
+class = "classNode"
+function = "functionNode"
+method = "methodNode"
+empty = "noteNode"
+parse_error = "errorNode"
+
+[block_types.moduleNode]
+shape = "rect"
+fill = "#f3eee2"
+stroke = "#8b6f47"
+stroke_width = "1.5px"
+color = "#1b1814"
+
+[block_types.classNode]
+shape = "fr-rect"
+fill = "#e8f1ff"
+stroke = "#28569c"
+stroke_width = "1.2px"
+color = "#1b1814"
+
+[block_types.functionNode]
+shape = "rect"
+fill = "#edf7ef"
+stroke = "#0f704b"
+stroke_width = "1.2px"
+color = "#1b1814"
+
+[block_types.methodNode]
+shape = "stadium"
+fill = "#fff6e6"
+stroke = "#a95c12"
+stroke_width = "1.2px"
+color = "#1b1814"
+
+[block_types.noteNode]
+shape = "text"
+fill = "#f8f7f4"
+stroke = "#8a8175"
+stroke_width = "1.2px"
+stroke_dasharray = "4 4"
+color = "#1b1814"
+
+[block_types.errorNode]
+shape = "hex"
+fill = "#fdeaea"
+stroke = "#a12c2c"
+stroke_width = "1.2px"
+color = "#1b1814"
