@@ -376,6 +376,11 @@ select {
   color: #88e7be;
 }
 
+.kind-ignored {
+  background: rgba(134, 146, 158, 0.12);
+  color: #6e7681;
+}
+
 .label {
   flex: 1;
   min-width: 0;
@@ -388,6 +393,14 @@ select {
 .label-directory {
   font-weight: 400;
   font-style: italic;
+}
+
+.label-ignored {
+  color: #6e7681;
+}
+
+.tree-row-ignored .toggle {
+  color: #6e7681;
 }
 
 .git-status-badge {

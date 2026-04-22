@@ -100,16 +100,6 @@ You can still override the frontend target explicitly:
 export VITE_TRANSLATE_API_BASE_URL=http://127.0.0.1:8766
 ```
 
-## Manual Tree Export
-
-Generate a static tree payload for any repo root:
-
-```bash
-python3 backend/generate_symbol_tree.py \
-  --repo-root /path/to/repo \
-  --output frontend/public/tree-data.json
-```
-
 ## Current Scope
 
 - Real directory tree

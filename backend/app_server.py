@@ -16,11 +16,9 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from code_outline import (
-    EXCLUDED_DIRS,
     build_preview_payload,
     build_python_symbol_payload,
     build_tree_payload,
-    should_track_repo_path,
 )
 
 try:
@@ -574,14 +572,9 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
             return True
         if relative_path.startswith(".git/refs/"):
             return True
-
-        relative_parts = Path(relative_path).parts
-        if any(part in EXCLUDED_DIRS for part in relative_parts):
+        if relative_path == ".git" or relative_path.startswith(".git/"):
             return False
-        if any(part.startswith(".") and part not in {".codex"} for part in relative_parts[:-1]):
-            return False
-
-        return should_track_repo_path(relative_path)
+        return bool(relative_path)
 
     def _write_tree_sse_event(self, event_name: str, payload: dict) -> None:
         try:

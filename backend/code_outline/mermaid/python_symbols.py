@@ -6,8 +6,8 @@ import ast
 import html
 from pathlib import Path
 
-from .common import build_source_signature, first_line, is_python_file, resolve_preview_target
-from .mermaid_blocks import load_mermaid_block_config
+from ..shared import build_source_signature, first_line, is_python_file, resolve_preview_target
+from .blocks import load_mermaid_block_config
 
 
 def build_python_symbol_payload(repo_root: str | Path, relative_path: str) -> dict:

@@ -34,6 +34,7 @@ export default function RepoTreePanel({
     const icon = KIND_ICON[node.data.kind] ?? "?";
     const gitStatus = node.data.git_status || null;
     const gitStatusKind = gitStatus?.display_kind || gitStatus?.kind || null;
+    const isGitIgnored = Boolean(node.data.git_ignored);
     const isDirectory = node.data.kind === "directory";
     const displayLabel = isDirectory ? `${node.data.name}/` : node.data.name;
 
@@ -55,7 +56,7 @@ export default function RepoTreePanel({
     return (
       <div
         style={style}
-        className={`tree-row ${node.isSelected ? "selected" : ""}`}
+        className={`tree-row ${node.isSelected ? "selected" : ""} ${isGitIgnored ? "tree-row-ignored" : ""}`}
         onClick={handleActivate}
         role="treeitem"
         aria-label={node.data.name}
@@ -76,8 +77,8 @@ export default function RepoTreePanel({
           >
             {isBranch ? <span className="toggle-chevron" aria-hidden="true" /> : null}
           </button>
-          <span className={`kind kind-${node.data.kind}`}>{icon}</span>
-          <span className={`label ${isDirectory ? "label-directory" : ""}`}>{displayLabel}</span>
+          <span className={`kind kind-${node.data.kind} ${isGitIgnored ? "kind-ignored" : ""}`}>{icon}</span>
+          <span className={`label ${isDirectory ? "label-directory" : ""} ${isGitIgnored ? "label-ignored" : ""}`}>{displayLabel}</span>
           {gitStatus ? (
             <span
               className={`git-status-badge git-status-${gitStatusKind} git-status-scope-${gitStatus.scope}`}

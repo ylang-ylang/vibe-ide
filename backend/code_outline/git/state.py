@@ -1,27 +1,66 @@
-"""Git status collection and source-diff annotations for previews."""
+"""Git-backed repo state used by tree and preview builders."""
 
 from __future__ import annotations
 
 import subprocess
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
-from .common import EXCLUDED_DIRS, GIT_STATUS_META, HUNK_HEADER_RE, should_track_repo_path
+from .common import GIT_STATUS_META, HUNK_HEADER_RE
 
 
-def collect_git_status(repo_root: Path) -> tuple[dict[str, dict], dict[str, dict]]:
-    """Collect direct file git status and aggregated directory git status."""
+@dataclass(frozen=True, slots=True)
+class GitRepoState:
+    """Git-derived repo view used by tree and preview builders."""
+
+    exact_status: dict[str, dict]
+    directory_status: dict[str, dict]
+    ignored_files: frozenset[str]
+    ignored_directories: frozenset[str]
+
+    def is_ignored_path(self, relative_path: str) -> bool:
+        """Return whether one repo-relative path is ignored by Git."""
+        normalized_path = relative_path.strip().strip("/")
+        if not normalized_path:
+            return False
+        if normalized_path in self.ignored_files:
+            return True
+        return any(
+            normalized_path == ignored_dir or normalized_path.startswith(f"{ignored_dir}/")
+            for ignored_dir in self.ignored_directories
+        )
+
+
+def collect_git_repo_state(repo_root: Path) -> GitRepoState:
+    """Collect git status, aggregated directory status, and ignored-path info."""
     try:
         raw_output = subprocess.run(
-            ["git", "-C", str(repo_root), "status", "--porcelain=v2", "-z", "--untracked-files=all"],
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "status",
+                "--porcelain=v2",
+                "-z",
+                "--untracked-files=all",
+                "--ignored=matching",
+            ],
             check=True,
             capture_output=True,
         ).stdout
     except (FileNotFoundError, subprocess.CalledProcessError):
-        return {}, {}
+        return GitRepoState(
+            exact_status={},
+            directory_status={},
+            ignored_files=frozenset(),
+            ignored_directories=frozenset(),
+        )
 
     exact_status: dict[str, dict] = {}
     directory_counters: dict[str, Counter[str]] = {"": Counter()}
+    ignored_files: set[str] = set()
+    ignored_directories: set[str] = set()
     entries = raw_output.split(b"\0")
     entry_index = 0
 
@@ -56,10 +95,18 @@ def collect_git_status(repo_root: Path) -> tuple[dict[str, dict], dict[str, dict
         elif record_type == "?":
             kind = "untracked"
             path = entry[2:]
+        elif record_type == "!":
+            ignored_path = entry[2:].rstrip("/")
+            if ignored_path:
+                if entry.endswith("/"):
+                    ignored_directories.add(ignored_path)
+                else:
+                    ignored_files.add(ignored_path)
+            continue
         else:
             continue
 
-        if kind is None or not should_include_git_status_path(path):
+        if kind is None:
             continue
 
         exact_status[path] = build_direct_git_status(kind)
@@ -71,7 +118,18 @@ def collect_git_status(repo_root: Path) -> tuple[dict[str, dict], dict[str, dict
         for directory_path, counter in directory_counters.items()
         if counter
     }
-    return exact_status, directory_status
+    return GitRepoState(
+        exact_status=exact_status,
+        directory_status=directory_status,
+        ignored_files=frozenset(ignored_files),
+        ignored_directories=frozenset(ignored_directories),
+    )
+
+
+def collect_git_status(repo_root: Path) -> tuple[dict[str, dict], dict[str, dict]]:
+    """Collect direct file git status and aggregated directory git status."""
+    git_state = collect_git_repo_state(repo_root)
+    return git_state.exact_status, git_state.directory_status
 
 
 def git_status_kind_from_xy(xy: str) -> str | None:
@@ -93,18 +151,6 @@ def git_status_kind_from_xy(xy: str) -> str | None:
     if "T" in xy:
         return "typechanged"
     return None
-
-
-def should_include_git_status_path(path: str) -> bool:
-    """Return whether one git status path should be visible in the tree UI."""
-    relative_path = Path(path)
-
-    for part in relative_path.parts[:-1]:
-        if part in EXCLUDED_DIRS:
-            return False
-        if part.startswith(".") and part not in {".codex"}:
-            return False
-    return should_track_repo_path(relative_path.as_posix())
 
 
 def git_status_ancestor_directories(path: str) -> list[str]:
@@ -153,10 +199,10 @@ def build_directory_git_status(counter: Counter[str]) -> dict:
 def collect_preview_source_git_info(
     repo_root: Path,
     relative_path: str,
-    exact_git_status: dict[str, dict],
+    exact_status: dict[str, dict],
 ) -> dict | None:
     """Return per-line git diff metadata for one preview target when available."""
-    file_git_status = exact_git_status.get(relative_path)
+    file_git_status = exact_status.get(relative_path)
     if not file_git_status or file_git_status["kind"] == "untracked":
         return None
 

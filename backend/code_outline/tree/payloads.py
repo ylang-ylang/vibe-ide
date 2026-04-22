@@ -8,27 +8,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from .common import (
-    EXCLUDED_DIRS,
-    Stats,
+from ..git import collect_git_repo_state, collect_preview_source_git_info
+from ..shared import (
     build_source_signature,
-    is_binary_file,
     is_python_file,
     resolve_preview_target,
 )
-from .git_status import collect_git_status, collect_preview_source_git_info
+from .common import (
+    Stats,
+    is_binary_file,
+)
 
 
 def build_tree_payload(repo_root: str | Path) -> dict:
     """Build the raw repository tree payload used by the frontend tree panel."""
     repo_root_path = Path(repo_root).resolve()
-    exact_git_status, directory_git_status = collect_git_status(repo_root_path)
+    git_state = collect_git_repo_state(repo_root_path)
     nodes = [
         _build_directory_node(
             repo_root_path,
             repo_root_path.name,
-            exact_git_status,
-            directory_git_status,
+            git_state,
         )
     ]
     stats = _count_stats(nodes)
@@ -49,21 +49,21 @@ def build_tree_payload(repo_root: str | Path) -> dict:
 def build_preview_payload(repo_root: str | Path, relative_path: str) -> dict:
     """Build the raw file preview payload for one repo-relative file path."""
     repo_root_path = Path(repo_root).resolve()
+    git_state = collect_git_repo_state(repo_root_path)
     target_path, normalized_relative_path = resolve_preview_target(
         repo_root=repo_root_path,
         relative_path=relative_path,
     )
-    exact_git_status, _ = collect_git_status(repo_root_path)
     preview_source_git_info = collect_preview_source_git_info(
         repo_root_path,
         normalized_relative_path,
-        exact_git_status,
+        git_state.exact_status,
     )
 
     payload = _build_raw_file_preview(
         target_path,
         normalized_relative_path,
-        exact_git_status,
+        git_state,
         preview_source_git_info,
     )
     payload["source_signature"] = build_source_signature(target_path)
@@ -73,14 +73,12 @@ def build_preview_payload(repo_root: str | Path, relative_path: str) -> dict:
 def _build_directory_node(
     path: Path,
     repo_name: str,
-    exact_git_status: dict[str, dict],
-    directory_git_status: dict[str, dict],
+    git_state,
 ) -> dict:
     children = _build_directory_children(
         path,
         repo_root=path,
-        exact_git_status=exact_git_status,
-        directory_git_status=directory_git_status,
+        git_state=git_state,
     )
     node = {
         "id": f"directory::{repo_name}",
@@ -91,7 +89,7 @@ def _build_directory_node(
         "child_count": len(children),
         "children": children,
     }
-    root_git_status = directory_git_status.get("")
+    root_git_status = git_state.directory_status.get("")
     if root_git_status:
         node["git_status"] = root_git_status
     return node
@@ -100,42 +98,46 @@ def _build_directory_node(
 def _build_directory_children(
     directory: Path,
     repo_root: Path,
-    exact_git_status: dict[str, dict],
-    directory_git_status: dict[str, dict],
+    git_state,
 ) -> list[dict]:
     children: list[dict] = []
     for entry in sorted(_iter_entries(directory), key=lambda item: (not item.is_dir(), item.name.lower())):
+        if entry.name == ".git":
+            continue
+
+        relative_path = entry.relative_to(repo_root).as_posix()
+        is_git_ignored = git_state.is_ignored_path(relative_path)
+
         if entry.is_dir():
-            if _should_skip_directory(entry):
-                continue
-            nested_children = _build_directory_children(
-                entry,
-                repo_root=repo_root,
-                exact_git_status=exact_git_status,
-                directory_git_status=directory_git_status,
-            )
-            relative_path = entry.relative_to(repo_root).as_posix()
+            nested_children = []
+            if not is_git_ignored:
+                nested_children = _build_directory_children(
+                    entry,
+                    repo_root=repo_root,
+                    git_state=git_state,
+                )
             node = {
                 "id": f"directory::{relative_path}",
                 "name": entry.name,
                 "kind": "directory",
                 "path": relative_path,
-                "summary": "Directory",
+                "summary": "Ignored by .gitignore" if is_git_ignored else "Directory",
                 "child_count": len(nested_children),
                 "children": nested_children,
             }
-            directory_status = directory_git_status.get(relative_path)
+            if is_git_ignored:
+                node["git_ignored"] = True
+            directory_status = git_state.directory_status.get(relative_path)
             if directory_status:
                 node["git_status"] = directory_status
             children.append(node)
             continue
 
-        relative_path = entry.relative_to(repo_root).as_posix()
         children.append(
             _build_file_tree_node(
                 entry,
                 relative_path,
-                exact_git_status,
+                git_state,
             )
         )
     return children
@@ -148,28 +150,22 @@ def _iter_entries(directory: Path) -> Iterable[Path]:
         return []
 
 
-def _should_skip_directory(path: Path) -> bool:
-    if path.name in EXCLUDED_DIRS:
-        return True
-    if path.name.startswith(".") and path.name not in {".codex"}:
-        return True
-    return False
-
-
 def _build_file_tree_node(
     path: Path,
     relative_path: str,
-    exact_git_status: dict[str, dict],
+    git_state,
 ) -> dict:
     node = {
         "id": f"file::{relative_path}",
         "name": path.name,
         "kind": "file",
         "path": relative_path,
-        "summary": "File",
+        "summary": "Ignored by .gitignore" if git_state.is_ignored_path(relative_path) else "File",
         "child_count": 0,
     }
-    file_git_status = exact_git_status.get(relative_path)
+    if git_state.is_ignored_path(relative_path):
+        node["git_ignored"] = True
+    file_git_status = git_state.exact_status.get(relative_path)
     if file_git_status:
         node["git_status"] = file_git_status
     return node
@@ -178,7 +174,7 @@ def _build_file_tree_node(
 def _build_raw_file_preview(
     path: Path,
     relative_path: str,
-    exact_git_status: dict[str, dict],
+    git_state,
     source_git_info: dict | None,
 ) -> dict:
     if is_binary_file(path):
@@ -191,7 +187,9 @@ def _build_raw_file_preview(
             "content_kind": "binary",
             "size_bytes": path.stat().st_size,
         }
-        file_git_status = exact_git_status.get(relative_path)
+        if git_state.is_ignored_path(relative_path):
+            node["git_ignored"] = True
+        file_git_status = git_state.exact_status.get(relative_path)
         if file_git_status:
             node["git_status"] = file_git_status
         return node
@@ -207,10 +205,12 @@ def _build_raw_file_preview(
         "content_kind": "text",
         "source_text": source,
     }
+    if git_state.is_ignored_path(relative_path):
+        node["git_ignored"] = True
     _attach_source_metadata(
         node=node,
         relative_path=relative_path,
-        exact_git_status=exact_git_status,
+        exact_git_status=git_state.exact_status,
         source_line_count=max(1, len(source_lines)),
         source_git_info=source_git_info,
     )

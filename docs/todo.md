@@ -33,7 +33,7 @@ Goal:
 - Evaluate replacing the current Python-only `ast` symbol extraction with an LSP `textDocument/documentSymbol` based adapter.
 
 Why:
-- Current symbol extraction in `backend/code_outline/python_symbols.py` is Python-specific.
+- Current symbol extraction in `backend/code_outline/mermaid/python_symbols.py` is Python-specific.
 - LSP could generalize symbol extraction across multiple code languages.
 - This may reduce per-language custom parser work.
 
