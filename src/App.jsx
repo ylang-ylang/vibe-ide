@@ -4,7 +4,8 @@ import PreviewPanel from "./components/PreviewPanel";
 import RepoTreePanel from "./components/RepoTreePanel";
 import { useTreeViewportHeight } from "./hooks/useTreeViewportHeight";
 import { TRANSLATE_API_BASE_URL, copyText, fetchJson, logClient } from "./lib/api";
-import { buildCodeRowsForSelectedSymbol } from "./lib/codeView";
+import { buildCodeRowsForSelectedSymbol, buildCodeRowsForWholeFile } from "./lib/codeView";
+import { isObviouslyBinaryPath, isPythonPath, resolveCodeLanguageFromPath } from "./lib/fileDisplay";
 import {
   collapseFromDeepestVisibleLevel,
   collectInternalNodeDepths,
@@ -40,9 +41,10 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [previewText, setPreviewText] = useState("");
   const [previewPath, setPreviewPath] = useState("");
+  const [previewContentKind, setPreviewContentKind] = useState("");
   const [previewSourceText, setPreviewSourceText] = useState("");
-  const [previewSourceLanguage, setPreviewSourceLanguage] = useState(null);
   const [previewSourceGitInfo, setPreviewSourceGitInfo] = useState({ current: [], deleted: [] });
+  const [previewSourceSignature, setPreviewSourceSignature] = useState("");
   const [previewSymbols, setPreviewSymbols] = useState([]);
   const [selectedPreviewSymbolId, setSelectedPreviewSymbolId] = useState("");
   const [copyStatus, setCopyStatus] = useState(null);
@@ -51,8 +53,8 @@ export default function App() {
   const [translationModel, setTranslationModel] = useState("");
   const [previewMode, setPreviewMode] = useState("original");
   const [isBooting, setIsBooting] = useState(true);
-  const [isRefreshingRoots, setIsRefreshingRoots] = useState(false);
   const [isLoadingTree, setIsLoadingTree] = useState(false);
+  const [isLoadingPythonSymbols, setIsLoadingPythonSymbols] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [treeBrowseDepth, setTreeBrowseDepth] = useState(0);
   const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
@@ -61,6 +63,16 @@ export default function App() {
   const [treePanelWidth, setTreePanelWidth] = useState(520);
   const [isResizingPanels, setIsResizingPanels] = useState(false);
   const translationRequestIdRef = useRef(0);
+  const previewRequestIdRef = useRef(0);
+  const pythonSymbolRequestIdRef = useRef(0);
+  const treeWatchRequestIdRef = useRef(0);
+  const treeWatchRef = useRef(null);
+  const previewWatchRequestIdRef = useRef(0);
+  const previewWatchRef = useRef(null);
+  const treeViewStateRef = useRef({ openIds: [], selectedId: "" });
+  const pendingTreeStateRestoreRef = useRef(false);
+  const treeStateRestoreFrameRef = useRef(0);
+  const activeTreeNodeIdRef = useRef("");
   const resizeStateRef = useRef({ startX: 0, startWidth: 520 });
   const treeBrowseSyncFrameRef = useRef(0);
   const treeApiRef = useRef(null);
@@ -87,9 +99,17 @@ export default function App() {
     [visibleTreeNodes],
   );
   const treeViewportHeight = useTreeViewportHeight(treeViewportRef, [isBooting, treePayload]);
+  const previewSourceLanguage = useMemo(
+    () => resolveCodeLanguageFromPath(previewPath),
+    [previewPath],
+  );
   const selectedPreviewSymbol = useMemo(
     () => previewSymbols.find((symbol) => symbol.id === selectedPreviewSymbolId) ?? null,
     [previewSymbols, selectedPreviewSymbolId],
+  );
+  const rawPreviewCodeRows = useMemo(
+    () => buildCodeRowsForWholeFile(previewSourceText, previewSourceGitInfo),
+    [previewSourceGitInfo, previewSourceText],
   );
   const selectedPreviewSymbolCodeRows = useMemo(
     () => buildCodeRowsForSelectedSymbol(previewSourceText, previewSourceGitInfo, selectedPreviewSymbol),
@@ -173,6 +193,45 @@ export default function App() {
   }, [treePayload, visibleTreeNodes, searchTerm, treeViewportHeight]);
 
   useEffect(() => {
+    if (!pendingTreeStateRestoreRef.current || !treePayload || treeViewportHeight <= 0) {
+      return undefined;
+    }
+
+    if (treeStateRestoreFrameRef.current) {
+      window.cancelAnimationFrame(treeStateRestoreFrameRef.current);
+    }
+
+    treeStateRestoreFrameRef.current = window.requestAnimationFrame(() => {
+      treeStateRestoreFrameRef.current = 0;
+      const tree = treeApiRef.current;
+      if (!tree) {
+        return;
+      }
+
+      for (const openId of treeViewStateRef.current.openIds) {
+        const targetNode = tree.get(openId);
+        if (targetNode?.isInternal && !targetNode.isOpen) {
+          tree.open(openId);
+        }
+      }
+
+      if (treeViewStateRef.current.selectedId && tree.get(treeViewStateRef.current.selectedId)) {
+        tree.select(treeViewStateRef.current.selectedId, { focus: false });
+      }
+
+      pendingTreeStateRestoreRef.current = false;
+      scheduleTreeBrowseDepthSync();
+    });
+
+    return () => {
+      if (treeStateRestoreFrameRef.current) {
+        window.cancelAnimationFrame(treeStateRestoreFrameRef.current);
+        treeStateRestoreFrameRef.current = 0;
+      }
+    };
+  }, [treePayload, visibleTreeNodes, treeViewportHeight]);
+
+  useEffect(() => {
     if (!isResizingPanels) {
       return undefined;
     }
@@ -219,9 +278,212 @@ export default function App() {
     setIsTranslating(false);
   }
 
+  function stopTreeWatch() {
+    treeWatchRequestIdRef.current += 1;
+    if (!treeWatchRef.current) {
+      return;
+    }
+    treeWatchRef.current.close();
+    treeWatchRef.current = null;
+  }
+
+  function resetTreeViewState() {
+    treeViewStateRef.current = { openIds: [], selectedId: "" };
+    pendingTreeStateRestoreRef.current = false;
+    activeTreeNodeIdRef.current = "";
+    if (treeStateRestoreFrameRef.current) {
+      window.cancelAnimationFrame(treeStateRestoreFrameRef.current);
+      treeStateRestoreFrameRef.current = 0;
+    }
+  }
+
+  function captureTreeViewState() {
+    const tree = treeApiRef.current;
+    if (!tree) {
+      treeViewStateRef.current = {
+        ...treeViewStateRef.current,
+        selectedId: activeTreeNodeIdRef.current || treeViewStateRef.current.selectedId,
+      };
+      return;
+    }
+
+    const openIds = tree.visibleNodes
+      .filter((treeNode) => treeNode.isInternal && treeNode.isOpen)
+      .map((treeNode) => treeNode.id);
+    const selectedId = tree.selectedNodes?.[0]?.id || activeTreeNodeIdRef.current || "";
+    treeViewStateRef.current = {
+      openIds,
+      selectedId,
+    };
+  }
+
+  function applyTreePayload(
+    payload,
+    {
+      preserveTreeState = false,
+      resetBrowseDepth = false,
+    } = {},
+  ) {
+    if (preserveTreeState) {
+      captureTreeViewState();
+      pendingTreeStateRestoreRef.current = true;
+    } else {
+      resetTreeViewState();
+    }
+
+    setTreePayload(payload);
+    if (resetBrowseDepth) {
+      setTreeBrowseDepth(0);
+    }
+  }
+
+  function stopPreviewWatch() {
+    previewWatchRequestIdRef.current += 1;
+    if (!previewWatchRef.current) {
+      return;
+    }
+    previewWatchRef.current.close();
+    previewWatchRef.current = null;
+  }
+
+  function cancelPythonSymbolRequest() {
+    pythonSymbolRequestIdRef.current += 1;
+    setIsLoadingPythonSymbols(false);
+  }
+
+  function resetPythonPreviewState() {
+    cancelPythonSymbolRequest();
+    setPreviewText("");
+    setPreviewSymbols([]);
+    setSelectedPreviewSymbolId("");
+  }
+
+  function clearPreview() {
+    stopPreviewWatch();
+    resetPythonPreviewState();
+    setPreviewPath("");
+    setPreviewContentKind("");
+    setPreviewSourceText("");
+    setPreviewSourceGitInfo({ current: [], deleted: [] });
+    setPreviewSourceSignature("");
+    setCopyStatus(null);
+    resetTranslation();
+  }
+
+  function applyRawPreviewPayload(
+    payload,
+    {
+      fallbackPath = "",
+      resetTranslatedView = false,
+    } = {},
+  ) {
+    const nextPath = payload.path || fallbackPath;
+    const nextContentKind = payload.content_kind || "";
+    const nextSourceText = payload.source_text || "";
+    const nextSourceGitInfo = payload.source_git_info || { current: [], deleted: [] };
+    const nextSourceSignature = payload.source_signature || "";
+
+    if (resetTranslatedView) {
+      resetTranslation();
+    }
+
+    resetPythonPreviewState();
+    setPreviewPath(nextPath);
+    setPreviewContentKind(nextContentKind);
+    setPreviewSourceText(nextSourceText);
+    setPreviewSourceGitInfo(nextSourceGitInfo);
+    setPreviewSourceSignature(nextSourceSignature);
+  }
+
+  function applyPythonSymbolPayload(payload, { preserveSelectedSymbol = true } = {}) {
+    const nextMermaidText = payload.symbol_mermaid || "";
+    const nextSymbolNodes = payload.symbol_nodes || [];
+
+    setPreviewText(nextMermaidText);
+    setPreviewSymbols(nextSymbolNodes);
+    setSelectedPreviewSymbolId((currentSymbolId) => {
+      if (preserveSelectedSymbol && nextSymbolNodes.some((symbol) => symbol.id === currentSymbolId)) {
+        return currentSymbolId;
+      }
+      return nextSymbolNodes[0]?.id || "";
+    });
+  }
+
+  async function loadPythonSymbolPreview({
+    repoRoot,
+    relativePath,
+    preserveSelectedSymbol = true,
+    copyOutline = false,
+  }) {
+    if (!repoRoot || !relativePath || !isPythonPath(relativePath)) {
+      return;
+    }
+
+    const requestId = pythonSymbolRequestIdRef.current + 1;
+    pythonSymbolRequestIdRef.current = requestId;
+    setIsLoadingPythonSymbols(true);
+    logClient("preview.python_symbol.start", { path: relativePath });
+
+    try {
+      const payload = await fetchJson(
+        `/api/python-symbol-preview?repo_root=${encodeURIComponent(repoRoot)}&path=${encodeURIComponent(relativePath)}`,
+      );
+      if (pythonSymbolRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      applyPythonSymbolPayload(payload, { preserveSelectedSymbol });
+      logClient("preview.python_symbol.success", {
+        path: relativePath,
+        symbolCount: Array.isArray(payload.symbol_nodes) ? payload.symbol_nodes.length : 0,
+      });
+
+      if (!copyOutline || !payload.symbol_outline_xml) {
+        return;
+      }
+
+      try {
+        const copied = await copyText(payload.symbol_outline_xml);
+        if (!copied) {
+          throw new Error("copy returned false");
+        }
+        if (pythonSymbolRequestIdRef.current === requestId) {
+          setCopyStatus({
+            kind: "success",
+            message: `copied XML outline for ${relativePath.split("/").at(-1)}`,
+          });
+        }
+      } catch {
+        if (pythonSymbolRequestIdRef.current === requestId) {
+          setCopyStatus({
+            kind: "warning",
+            message: "Python symbol preview updated, XML outline copy failed",
+          });
+        }
+      }
+    } catch (error) {
+      if (pythonSymbolRequestIdRef.current !== requestId) {
+        return;
+      }
+      setCopyStatus({
+        kind: "warning",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      logClient("preview.python_symbol.error", {
+        path: relativePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      if (pythonSymbolRequestIdRef.current === requestId) {
+        setIsLoadingPythonSymbols(false);
+      }
+    }
+  }
+
   async function loadTree(repoRoot, cancelled = false) {
     setIsLoadingTree(true);
     setLoadError("");
+    previewRequestIdRef.current += 1;
     logClient("tree.load", { repoRoot });
 
     try {
@@ -229,17 +491,8 @@ export default function App() {
       if (cancelled) {
         return;
       }
-      setTreePayload(payload);
-      setTreeBrowseDepth(0);
-      setPreviewText("");
-      setPreviewPath("");
-      setPreviewSourceText("");
-      setPreviewSourceLanguage(null);
-      setPreviewSourceGitInfo({ current: [], deleted: [] });
-      setPreviewSymbols([]);
-      setSelectedPreviewSymbolId("");
-      setCopyStatus(null);
-      resetTranslation();
+      applyTreePayload(payload, { resetBrowseDepth: true });
+      clearPreview();
     } catch (error) {
       if (!cancelled) {
         setLoadError(error instanceof Error ? error.message : String(error));
@@ -255,18 +508,13 @@ export default function App() {
   async function handleRepoRootChange(nextRepoRoot) {
     logClient("repo_root.change", { repoRoot: nextRepoRoot });
     setSelectedRepoRoot(nextRepoRoot);
+    previewRequestIdRef.current += 1;
     if (!nextRepoRoot) {
+      stopTreeWatch();
       setTreePayload(null);
       setTreeBrowseDepth(0);
-      setPreviewText("");
-      setPreviewPath("");
-      setPreviewSourceText("");
-      setPreviewSourceLanguage(null);
-      setPreviewSourceGitInfo({ current: [], deleted: [] });
-      setPreviewSymbols([]);
-      setSelectedPreviewSymbolId("");
-      setCopyStatus(null);
-      resetTranslation();
+      resetTreeViewState();
+      clearPreview();
       return;
     }
 
@@ -282,21 +530,13 @@ export default function App() {
         body: JSON.stringify({ repo_root: nextRepoRoot }),
       });
 
-      setTreePayload(payload.tree_payload);
+      applyTreePayload(payload.tree_payload, { resetBrowseDepth: true });
       setSelectedRepoRoot(payload.selected_repo_root);
-      setTreeBrowseDepth(0);
-      setPreviewText("");
-      setPreviewPath("");
-      setPreviewSourceText("");
-      setPreviewSourceLanguage(null);
-      setPreviewSourceGitInfo({ current: [], deleted: [] });
-      setPreviewSymbols([]);
-      setSelectedPreviewSymbolId("");
+      clearPreview();
       setCopyStatus({
         kind: "success",
         message: `remembered ${nextRepoRoot.split("/").at(-1)}`,
       });
-      resetTranslation();
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
       setTreePayload(null);
@@ -305,64 +545,286 @@ export default function App() {
     }
   }
 
-  async function refreshRepoRoots() {
-    setIsRefreshingRoots(true);
-    setLoadError("");
-    logClient("repo_root.refresh");
-
-    try {
-      const payload = await fetchJson("/api/repo-roots");
-      setRepoRoots(payload.repo_roots);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsRefreshingRoots(false);
-    }
-  }
-
   async function handlePreviewNodeActivate(node) {
-    const mermaidText = node.data.symbol_mermaid || "";
-    const xmlOutlineText = node.data.symbol_outline_xml || "";
-    const sourceText = node.data.source_text || "";
-    const sourceLanguage = node.data.code_language || null;
-    const sourceGitInfo = node.data.source_git_info || { current: [], deleted: [] };
-    const symbolNodes = node.data.symbol_nodes || [];
-    setPreviewText(mermaidText);
-    setPreviewPath(node.data.path);
-    setPreviewSourceText(sourceText);
-    setPreviewSourceLanguage(sourceLanguage);
-    setPreviewSourceGitInfo(sourceGitInfo);
-    setPreviewSymbols(symbolNodes);
-    setSelectedPreviewSymbolId(symbolNodes[0]?.id || "");
+    if (!selectedRepoRoot) {
+      return;
+    }
+
+    const targetPath = node.data.path || "";
+
+    if (targetPath !== previewPath) {
+      stopPreviewWatch();
+    }
+    const requestId = previewRequestIdRef.current + 1;
+    previewRequestIdRef.current = requestId;
+    cancelPythonSymbolRequest();
     resetTranslation();
     logClient("preview.activate", {
       nodeId: node.id,
-      path: node.data.path,
+      path: targetPath,
       kind: node.data.kind,
-      language: sourceLanguage,
     });
 
-    if (!xmlOutlineText) {
+    if (isObviouslyBinaryPath(targetPath)) {
+      applyRawPreviewPayload({
+        path: targetPath,
+        content_kind: "binary",
+        source_signature: "",
+      }, {
+        fallbackPath: targetPath,
+      });
+      setCopyStatus(null);
+      logClient("preview.activate.skip_obvious_binary", {
+        path: targetPath,
+      });
+      return;
+    }
+
+    setCopyStatus({
+      kind: "muted",
+      message: `loading preview for ${node.data.name}...`,
+    });
+
+    let payload;
+    try {
+      payload = await fetchJson(
+        `/api/preview?repo_root=${encodeURIComponent(selectedRepoRoot)}&path=${encodeURIComponent(targetPath)}`,
+      );
+    } catch (error) {
+      if (previewRequestIdRef.current !== requestId) {
+        return;
+      }
+      setCopyStatus({
+        kind: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    if (previewRequestIdRef.current !== requestId) {
+      return;
+    }
+
+    applyRawPreviewPayload(payload, {
+      fallbackPath: targetPath,
+    });
+
+    const resolvedPath = payload.path || targetPath;
+    if (payload.content_kind !== "text" || !isPythonPath(resolvedPath)) {
       setCopyStatus(null);
       return;
     }
 
-    try {
-      const copied = await copyText(xmlOutlineText);
-      if (!copied) {
-        throw new Error("copy returned false");
+    await loadPythonSymbolPreview({
+      repoRoot: selectedRepoRoot,
+      relativePath: resolvedPath,
+      preserveSelectedSymbol: false,
+      copyOutline: true,
+    });
+  }
+
+  useEffect(() => {
+    stopTreeWatch();
+
+    const repoRootPath = treePayload?.meta?.repo_root_path || "";
+    const treeSignature = treePayload?.meta?.tree_signature || "";
+    if (!selectedRepoRoot || !repoRootPath || repoRootPath !== selectedRepoRoot || !treeSignature) {
+      return undefined;
+    }
+
+    const watchRequestId = treeWatchRequestIdRef.current + 1;
+    treeWatchRequestIdRef.current = watchRequestId;
+    const watchUrl = `/api/watch-tree?repo_root=${encodeURIComponent(selectedRepoRoot)}&since_signature=${encodeURIComponent(treeSignature)}`;
+    const eventSource = new EventSource(watchUrl);
+    treeWatchRef.current = eventSource;
+    logClient("tree.watch.start", {
+      repoRoot: selectedRepoRoot,
+      treeSignature,
+    });
+
+    function handleWatchReady(event) {
+      if (treeWatchRequestIdRef.current !== watchRequestId) {
+        return;
       }
-      setCopyStatus({
-        kind: "success",
-        message: `copied XML outline for ${node.data.name}`,
+      try {
+        const payload = JSON.parse(event.data);
+        logClient("tree.watch.ready", payload);
+      } catch (error) {
+        logClient("tree.watch.ready.parse_error", {
+          repoRoot: selectedRepoRoot,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    function handleTreeRefresh(event) {
+      if (treeWatchRequestIdRef.current !== watchRequestId) {
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch (error) {
+        logClient("tree.watch.parse_error", {
+          repoRoot: selectedRepoRoot,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+
+      applyTreePayload(payload, {
+        preserveTreeState: true,
       });
-    } catch {
-      setCopyStatus({
-        kind: "warning",
-        message: "Mermaid preview updated, XML outline copy failed",
+      logClient("tree.watch.refresh", {
+        repoRoot: selectedRepoRoot,
+        treeSignature: payload.meta?.tree_signature || "",
       });
     }
-  }
+
+    function handleTreeWatchError() {
+      if (treeWatchRequestIdRef.current !== watchRequestId) {
+        return;
+      }
+      logClient("tree.watch.connection_error", {
+        repoRoot: selectedRepoRoot,
+      });
+    }
+
+    eventSource.addEventListener("watch_ready", handleWatchReady);
+    eventSource.addEventListener("tree", handleTreeRefresh);
+    eventSource.onerror = handleTreeWatchError;
+
+    return () => {
+      eventSource.removeEventListener("watch_ready", handleWatchReady);
+      eventSource.removeEventListener("tree", handleTreeRefresh);
+      eventSource.close();
+      if (treeWatchRef.current === eventSource) {
+        treeWatchRef.current = null;
+      }
+      logClient("tree.watch.stop", { repoRoot: selectedRepoRoot });
+    };
+  }, [selectedRepoRoot, treePayload?.meta?.repo_root_path]);
+
+  useEffect(() => {
+    stopPreviewWatch();
+
+    if (!selectedRepoRoot || !previewPath || previewContentKind !== "text") {
+      return undefined;
+    }
+
+    const watchRequestId = previewWatchRequestIdRef.current + 1;
+    previewWatchRequestIdRef.current = watchRequestId;
+    const watchUrl = `/api/watch-preview?repo_root=${encodeURIComponent(selectedRepoRoot)}&path=${encodeURIComponent(previewPath)}&since_signature=${encodeURIComponent(previewSourceSignature)}`;
+    const eventSource = new EventSource(watchUrl);
+    previewWatchRef.current = eventSource;
+    logClient("preview.watch.start", {
+      previewPath,
+      sourceSignature: previewSourceSignature,
+    });
+
+    function handleWatchReady(event) {
+      if (previewWatchRequestIdRef.current !== watchRequestId) {
+        return;
+      }
+      try {
+        const payload = JSON.parse(event.data);
+        logClient("preview.watch.ready", payload);
+      } catch (error) {
+        logClient("preview.watch.ready.parse_error", {
+          previewPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    async function handleWatchPreview(event) {
+      if (previewWatchRequestIdRef.current !== watchRequestId) {
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch (error) {
+        logClient("preview.watch.parse_error", {
+          previewPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+
+      applyRawPreviewPayload(payload, {
+        fallbackPath: previewPath,
+        resetTranslatedView: true,
+      });
+      setCopyStatus({
+        kind: "muted",
+        message: `refreshed ${payload.path.split("/").at(-1)} from disk`,
+      });
+      logClient("preview.watch.refresh", {
+        previewPath: payload.path,
+        sourceSignature: payload.source_signature || "",
+      });
+
+      if (payload.content_kind === "text" && isPythonPath(payload.path)) {
+        await loadPythonSymbolPreview({
+          repoRoot: selectedRepoRoot,
+          relativePath: payload.path,
+          preserveSelectedSymbol: true,
+          copyOutline: false,
+        });
+      }
+    }
+
+    function handleWatchPreviewError(event) {
+      if (previewWatchRequestIdRef.current !== watchRequestId) {
+        return;
+      }
+
+      let message = "preview watch stopped";
+      try {
+        const payload = JSON.parse(event.data);
+        if (typeof payload.error === "string" && payload.error) {
+          message = payload.error;
+        }
+      } catch {
+        // Ignore JSON parse failures for watch error events.
+      }
+
+      setCopyStatus({
+        kind: "error",
+        message,
+      });
+      logClient("preview.watch.error", {
+        previewPath,
+        error: message,
+      });
+    }
+
+    function handleWatchConnectionError() {
+      if (previewWatchRequestIdRef.current !== watchRequestId) {
+        return;
+      }
+      logClient("preview.watch.connection_error", { previewPath });
+    }
+
+    eventSource.addEventListener("watch_ready", handleWatchReady);
+    eventSource.addEventListener("preview", handleWatchPreview);
+    eventSource.addEventListener("preview_error", handleWatchPreviewError);
+    eventSource.onerror = handleWatchConnectionError;
+
+    return () => {
+      eventSource.removeEventListener("watch_ready", handleWatchReady);
+      eventSource.removeEventListener("preview", handleWatchPreview);
+      eventSource.removeEventListener("preview_error", handleWatchPreviewError);
+      eventSource.close();
+      if (previewWatchRef.current === eventSource) {
+        previewWatchRef.current = null;
+      }
+      logClient("preview.watch.stop", { previewPath });
+    };
+  }, [previewContentKind, previewPath, selectedRepoRoot]);
 
   async function handleTranslatePreview() {
     if (!previewText) {
@@ -425,6 +887,11 @@ export default function App() {
     if (!node) {
       return;
     }
+    activeTreeNodeIdRef.current = node.id;
+    treeViewStateRef.current = {
+      ...treeViewStateRef.current,
+      selectedId: node.id,
+    };
     logClient("tree.active_node", {
       reason,
       nodeId: node.id,
@@ -448,6 +915,7 @@ export default function App() {
     }
 
     const result = expandFromDeepestVisibleLevel(tree);
+    captureTreeViewState();
     scheduleTreeBrowseDepthSync();
     logClient("tree.expand_level", {
       fromDepth: result.fromDepth,
@@ -464,6 +932,7 @@ export default function App() {
     }
 
     const result = collapseFromDeepestVisibleLevel(tree);
+    captureTreeViewState();
     scheduleTreeBrowseDepthSync();
     logClient("tree.collapse_level", {
       fromDepth: result.fromDepth,
@@ -501,6 +970,7 @@ export default function App() {
   function handleTreeToggleStateChange(nodeId) {
     const tree = treeApiRef.current;
     const isOpen = tree?.isOpen(nodeId) || false;
+    captureTreeViewState();
     scheduleTreeBrowseDepthSync();
     logClient("tree.toggle.applied", {
       nodeId,
@@ -555,7 +1025,6 @@ export default function App() {
           selectedRepoRoot={selectedRepoRoot}
           repoRoots={repoRoots}
           selectedRepoOption={selectedRepoOption}
-          isRefreshingRoots={isRefreshingRoots}
           isLoadingTree={isLoadingTree}
           treePayload={treePayload}
           visibleTreeNodes={visibleTreeNodes}
@@ -568,7 +1037,6 @@ export default function App() {
           treeApiRef={treeApiRef}
           treeViewportRef={treeViewportRef}
           onRepoRootChange={handleRepoRootChange}
-          onRefreshRepoRoots={refreshRepoRoots}
           onSearchTermChange={setSearchTerm}
           onExpandTarget={handleExpandTarget}
           onCollapseTarget={handleCollapseTarget}
@@ -596,6 +1064,8 @@ export default function App() {
           displayedPreviewText={orientedPreviewText}
           previewPath={previewPath}
           previewSourceLanguage={previewSourceLanguage}
+          previewContentKind={previewContentKind}
+          rawSourceCodeRows={rawPreviewCodeRows}
           selectedSymbolCodeRows={selectedPreviewSymbolCodeRows}
           previewSymbols={previewSymbols}
           selectedSymbol={selectedPreviewSymbol}
@@ -604,6 +1074,7 @@ export default function App() {
           translationModel={translationModel}
           isTranslating={isTranslating}
           isShowingTranslated={previewMode === "translated" && Boolean(translationText)}
+          isLoadingPythonSymbols={isLoadingPythonSymbols}
           isMermaidInteractive={isMermaidInteractive}
           mermaidDirection={mermaidDirection}
           onMermaidDirectionChange={handleMermaidDirectionChange}

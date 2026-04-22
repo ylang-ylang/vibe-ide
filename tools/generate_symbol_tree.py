@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Generate repository tree payloads with Python module summaries."""
+"""Generate raw repository tree payloads and Python symbol previews."""
 
 from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import html
 import json
 import re
@@ -31,33 +32,7 @@ EXCLUDED_DIRS = {
     "third_party",
 }
 
-INCLUDED_FILE_SUFFIXES = {
-    ".css",
-    ".js",
-    ".json",
-    ".jsx",
-    ".md",
-    ".py",
-    ".ts",
-    ".tsx",
-    ".toml",
-    ".yaml",
-    ".yml",
-}
-
-CODE_LANGUAGE_BY_SUFFIX = {
-    ".css": "css",
-    ".js": "javascript",
-    ".json": "json",
-    ".jsx": "jsx",
-    ".md": "markdown",
-    ".py": "python",
-    ".toml": "toml",
-    ".ts": "typescript",
-    ".tsx": "tsx",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-}
+PYTHON_FILE_SUFFIX = ".py"
 
 GIT_STATUS_META = {
     "conflicted": {"code": "!", "label": "conflicted", "priority": 70},
@@ -81,6 +56,11 @@ class Stats:
     python_files: int
 
 
+def should_track_repo_path(relative_path: str) -> bool:
+    """Return whether one repo-relative path can affect visible tree content or git badges."""
+    return bool(relative_path and Path(relative_path).name.lower() != ".ds_store")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", default=".")
@@ -99,17 +79,16 @@ def main() -> None:
 def build_tree_payload(repo_root: str | Path) -> dict:
     repo_root_path = Path(repo_root).resolve()
     exact_git_status, directory_git_status = _collect_git_status(repo_root_path)
-    source_git_info = _collect_source_git_info(repo_root_path, exact_git_status)
     nodes = [
         _build_directory_node(
             repo_root_path,
             repo_root_path.name,
             exact_git_status,
             directory_git_status,
-            source_git_info,
         )
     ]
     stats = _count_stats(nodes)
+    tree_signature = _build_tree_signature(nodes)
     return {
         "meta": {
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -117,9 +96,47 @@ def build_tree_payload(repo_root: str | Path) -> dict:
             "repo_root_path": str(repo_root_path),
             "python_files": stats.python_files,
             "total_nodes": stats.total_nodes,
+            "tree_signature": tree_signature,
         },
         "nodes": nodes,
     }
+
+
+def build_preview_payload(repo_root: str | Path, relative_path: str) -> dict:
+    repo_root_path = Path(repo_root).resolve()
+    target_path, normalized_relative_path = _resolve_preview_target(
+        repo_root=repo_root_path,
+        relative_path=relative_path,
+    )
+    exact_git_status, _ = _collect_git_status(repo_root_path)
+    preview_source_git_info = _collect_preview_source_git_info(
+        repo_root_path,
+        normalized_relative_path,
+        exact_git_status,
+    )
+
+    payload = _build_raw_file_preview(
+        target_path,
+        normalized_relative_path,
+        exact_git_status,
+        preview_source_git_info,
+    )
+    payload["source_signature"] = _build_source_signature(target_path)
+    return payload
+
+
+def build_python_symbol_payload(repo_root: str | Path, relative_path: str) -> dict:
+    repo_root_path = Path(repo_root).resolve()
+    target_path, normalized_relative_path = _resolve_preview_target(
+        repo_root=repo_root_path,
+        relative_path=relative_path,
+    )
+    if not _is_python_file(normalized_relative_path):
+        raise ValueError(f"path is not a Python file: {normalized_relative_path}")
+
+    payload = _build_python_symbol_preview(target_path, normalized_relative_path)
+    payload["source_signature"] = _build_source_signature(target_path)
+    return payload
 
 
 def _build_directory_node(
@@ -127,14 +144,12 @@ def _build_directory_node(
     repo_name: str,
     exact_git_status: dict[str, dict],
     directory_git_status: dict[str, dict],
-    source_git_info: dict[str, dict],
 ) -> dict:
     children = _build_directory_children(
         path,
         repo_root=path,
         exact_git_status=exact_git_status,
         directory_git_status=directory_git_status,
-        source_git_info=source_git_info,
     )
     node = {
         "id": f"directory::{repo_name}",
@@ -156,7 +171,6 @@ def _build_directory_children(
     repo_root: Path,
     exact_git_status: dict[str, dict],
     directory_git_status: dict[str, dict],
-    source_git_info: dict[str, dict],
 ) -> list[dict]:
     children: list[dict] = []
     for entry in sorted(_iter_entries(directory), key=lambda item: (not item.is_dir(), item.name.lower())):
@@ -168,10 +182,7 @@ def _build_directory_children(
                 repo_root=repo_root,
                 exact_git_status=exact_git_status,
                 directory_git_status=directory_git_status,
-                source_git_info=source_git_info,
             )
-            if not nested_children:
-                continue
             relative_path = entry.relative_to(repo_root).as_posix()
             node = {
                 "id": f"directory::{relative_path}",
@@ -188,28 +199,14 @@ def _build_directory_children(
             children.append(node)
             continue
 
-        if entry.suffix.lower() not in INCLUDED_FILE_SUFFIXES:
-            continue
-
         relative_path = entry.relative_to(repo_root).as_posix()
-        if entry.suffix.lower() == ".py":
-            children.append(
-                _build_python_module_node(
-                    entry,
-                    relative_path,
-                    exact_git_status,
-                    source_git_info.get(relative_path),
-                )
+        children.append(
+            _build_file_tree_node(
+                entry,
+                relative_path,
+                exact_git_status,
             )
-        else:
-            children.append(
-                _build_text_file_node(
-                    entry,
-                    relative_path,
-                    exact_git_status,
-                    source_git_info.get(relative_path),
-                )
-            )
+        )
     return children
 
 
@@ -228,11 +225,28 @@ def _should_skip_directory(path: Path) -> bool:
     return False
 
 
-def _build_python_module_node(
+def _build_file_tree_node(
     path: Path,
     relative_path: str,
     exact_git_status: dict[str, dict],
-    source_git_info: dict | None,
+) -> dict:
+    node = {
+        "id": f"file::{relative_path}",
+        "name": path.name,
+        "kind": "file",
+        "path": relative_path,
+        "summary": "File",
+        "child_count": 0,
+    }
+    file_git_status = exact_git_status.get(relative_path)
+    if file_git_status:
+        node["git_status"] = file_git_status
+    return node
+
+
+def _build_python_symbol_preview(
+    path: Path,
+    relative_path: str,
 ) -> dict:
     source = path.read_text(encoding="utf-8")
     source_lines = source.splitlines()
@@ -245,11 +259,6 @@ def _build_python_module_node(
             "kind": "module",
             "path": relative_path,
             "summary": f"Python module with parse error: {exc.msg}",
-            "line": exc.lineno or 1,
-            "line_end": max(1, len(source_lines)),
-            "child_count": 0,
-            "source_text": source,
-            "code_language": _get_code_language_from_path(relative_path),
             "symbol_nodes": [
                 _build_whole_file_symbol_node(
                     symbol_id="module",
@@ -262,13 +271,6 @@ def _build_python_module_node(
             "symbol_mermaid": _render_parse_error_mermaid(relative_path, exc.msg),
             "symbol_outline_xml": _render_parse_error_outline_xml(relative_path, exc.msg),
         }
-        _attach_source_metadata(
-            node=node,
-            relative_path=relative_path,
-            exact_git_status=exact_git_status,
-            source_line_count=max(1, len(source_lines)),
-            source_git_info=source_git_info,
-        )
         return node
 
     module_doc = _first_line(ast.get_docstring(tree))
@@ -290,11 +292,6 @@ def _build_python_module_node(
         "kind": "module",
         "path": relative_path,
         "summary": module_doc or "Python module",
-        "line": 1,
-        "line_end": max(1, len(source_lines)),
-        "child_count": len(classes) + len(functions),
-        "source_text": source,
-        "code_language": _get_code_language_from_path(relative_path),
         "symbol_nodes": _build_module_symbol_nodes(
             module_path=relative_path,
             module_doc=module_doc,
@@ -316,45 +313,40 @@ def _build_python_module_node(
             main_guard=main_guard,
         ),
     }
-    _attach_source_metadata(
-        node=node,
-        relative_path=relative_path,
-        exact_git_status=exact_git_status,
-        source_line_count=max(1, len(source_lines)),
-        source_git_info=source_git_info,
-    )
     return node
 
 
-def _build_text_file_node(
+def _build_raw_file_preview(
     path: Path,
     relative_path: str,
     exact_git_status: dict[str, dict],
     source_git_info: dict | None,
 ) -> dict:
-    source = path.read_text(encoding="utf-8")
+    if _is_binary_file(path):
+        node = {
+            "id": f"file::{relative_path}",
+            "name": path.name,
+            "kind": "file",
+            "path": relative_path,
+            "summary": "Binary file",
+            "content_kind": "binary",
+            "size_bytes": path.stat().st_size,
+        }
+        file_git_status = exact_git_status.get(relative_path)
+        if file_git_status:
+            node["git_status"] = file_git_status
+        return node
+
+    source = path.read_text(encoding="utf-8", errors="replace")
     source_lines = source.splitlines()
-    suffix_label = path.suffix[1:].upper() if path.suffix else "TEXT"
     node = {
         "id": f"file::{relative_path}",
         "name": path.name,
         "kind": "file",
         "path": relative_path,
-        "summary": f"{suffix_label} file",
-        "line": 1,
-        "line_end": max(1, len(source_lines)),
-        "child_count": 0,
+        "summary": "Text file",
+        "content_kind": "text",
         "source_text": source,
-        "code_language": _get_code_language_from_path(relative_path),
-        "symbol_nodes": [
-            _build_whole_file_symbol_node(
-                symbol_id="file",
-                kind="file",
-                title=relative_path,
-                summary=f"{suffix_label} file",
-                line_count=max(1, len(source_lines)),
-            )
-        ],
     }
     _attach_source_metadata(
         node=node,
@@ -364,6 +356,20 @@ def _build_text_file_node(
         source_git_info=source_git_info,
     )
     return node
+
+
+def _resolve_preview_target(repo_root: Path, relative_path: str) -> tuple[Path, str]:
+    normalized_relative_path = relative_path.strip().strip("/")
+    if not normalized_relative_path:
+        raise ValueError("path must be a non-empty repo-relative path")
+
+    target_path = (repo_root / normalized_relative_path).resolve()
+    if not target_path.is_relative_to(repo_root):
+        raise ValueError(f"path must stay inside repo root: {relative_path}")
+    if not target_path.is_file():
+        raise ValueError(f"path is not a file: {relative_path}")
+
+    return target_path, target_path.relative_to(repo_root).as_posix()
 
 
 def _attach_source_metadata(
@@ -409,8 +415,28 @@ def _build_whole_file_symbol_node(
     }
 
 
-def _get_code_language_from_path(relative_path: str) -> str | None:
-    return CODE_LANGUAGE_BY_SUFFIX.get(Path(relative_path).suffix.lower())
+def _is_python_file(relative_path: str) -> bool:
+    return Path(relative_path).suffix.lower() == PYTHON_FILE_SUFFIX
+
+
+def _is_binary_file(path: Path) -> bool:
+    """Detect binary-vs-text via the system `file` tool instead of local heuristics."""
+    try:
+        mime_encoding = subprocess.run(
+            ["file", "--mime-encoding", "-b", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip().lower()
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        raise RuntimeError("system `file` command is required for backend binary detection")
+
+    return mime_encoding == "binary"
+
+
+def _build_source_signature(path: Path) -> str:
+    stat_result = path.stat()
+    return f"{stat_result.st_mtime_ns}:{stat_result.st_size}"
 
 
 def _first_line(text: str | None) -> str | None:
@@ -431,7 +457,7 @@ def _count_stats(nodes: list[dict]) -> Stats:
         nonlocal total_nodes, python_files
         for node in node_list:
             total_nodes += 1
-            if node["kind"] == "module":
+            if node["kind"] == "file" and _is_python_file(node["path"]):
                 python_files += 1
             children = node.get("children", [])
             if children:
@@ -439,6 +465,11 @@ def _count_stats(nodes: list[dict]) -> Stats:
 
     walk(nodes)
     return Stats(total_nodes=total_nodes, python_files=python_files)
+
+
+def _build_tree_signature(nodes: list[dict]) -> str:
+    stable_json = json.dumps(nodes, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha1(stable_json.encode("utf-8")).hexdigest()
 
 
 def _collect_git_status(repo_root: Path) -> tuple[dict[str, dict], dict[str, dict]]:
@@ -527,15 +558,13 @@ def _git_status_kind_from_xy(xy: str) -> str | None:
 
 def _should_include_git_status_path(path: str) -> bool:
     relative_path = Path(path)
-    if relative_path.suffix not in INCLUDED_FILE_SUFFIXES:
-        return False
 
     for part in relative_path.parts[:-1]:
         if part in EXCLUDED_DIRS:
             return False
         if part.startswith(".") and part not in {".codex"}:
             return False
-    return True
+    return should_track_repo_path(relative_path.as_posix())
 
 
 def _git_status_ancestor_directories(path: str) -> list[str]:
@@ -578,20 +607,19 @@ def _build_directory_git_status(counter: Counter[str]) -> dict:
     }
 
 
-def _collect_source_git_info(repo_root: Path, exact_git_status: dict[str, dict]) -> dict[str, dict]:
-    source_git_info: dict[str, dict] = {}
+def _collect_preview_source_git_info(
+    repo_root: Path,
+    relative_path: str,
+    exact_git_status: dict[str, dict],
+) -> dict | None:
+    file_git_status = exact_git_status.get(relative_path)
+    if not file_git_status or file_git_status["kind"] == "untracked":
+        return None
 
-    for relative_path, git_status in exact_git_status.items():
-        if Path(relative_path).suffix.lower() not in INCLUDED_FILE_SUFFIXES:
-            continue
-        if git_status["kind"] == "untracked":
-            continue
-
-        diff_info = _build_source_git_info_from_diff(repo_root, relative_path)
-        if diff_info["current"] or diff_info["deleted"]:
-            source_git_info[relative_path] = diff_info
-
-    return source_git_info
+    diff_info = _build_source_git_info_from_diff(repo_root, relative_path)
+    if diff_info["current"] or diff_info["deleted"]:
+        return diff_info
+    return None
 
 
 def _build_source_git_info_from_diff(repo_root: Path, relative_path: str) -> dict:

@@ -1,17 +1,6 @@
 const SHIKI_THEME = "dark-plus";
-const DEFAULT_LANGUAGE = "python";
-const LANGUAGE_LOADERS = {
-  css: () => import("@shikijs/langs/css").then((module) => module.default),
-  javascript: () => import("@shikijs/langs/javascript").then((module) => module.default),
-  json: () => import("@shikijs/langs/json").then((module) => module.default),
-  jsx: () => import("@shikijs/langs/jsx").then((module) => module.default),
-  markdown: () => import("@shikijs/langs/markdown").then((module) => module.default),
-  python: () => import("@shikijs/langs/python").then((module) => module.default),
-  toml: () => import("@shikijs/langs/toml").then((module) => module.default),
-  typescript: () => import("@shikijs/langs/typescript").then((module) => module.default),
-  tsx: () => import("@shikijs/langs/tsx").then((module) => module.default),
-  yaml: () => import("@shikijs/langs/yaml").then((module) => module.default),
-};
+const DEFAULT_LANGUAGE = null;
+const LANGUAGE_MODULES = import.meta.glob("../../node_modules/@shikijs/langs/dist/*.mjs");
 
 let highlighterPromise = null;
 const loadedLanguages = new Set();
@@ -40,20 +29,31 @@ function getHighlighter() {
 }
 
 async function ensureLanguageLoaded(highlighter, language) {
-  const resolvedLanguage = language && LANGUAGE_LOADERS[language] ? language : null;
+  const resolvedLanguage = normalizeLanguage(language);
+  const loadLanguage = resolvedLanguage
+    ? LANGUAGE_MODULES[`../../node_modules/@shikijs/langs/dist/${resolvedLanguage}.mjs`]
+    : null;
   if (loadedLanguages.has(resolvedLanguage)) {
     return resolvedLanguage;
   }
 
-  if (!resolvedLanguage) {
+  if (!resolvedLanguage || !loadLanguage) {
     return null;
   }
 
-  const loadLanguage = LANGUAGE_LOADERS[resolvedLanguage];
-  const languageDefinition = await loadLanguage();
+  const languageDefinition = (await loadLanguage()).default;
   await highlighter.loadLanguage(languageDefinition);
   loadedLanguages.add(resolvedLanguage);
   return resolvedLanguage;
+}
+
+function normalizeLanguage(language) {
+  if (!language) {
+    return null;
+  }
+
+  const normalizedLanguage = String(language).trim().toLowerCase();
+  return normalizedLanguage || null;
 }
 
 function buildTokenStyle(token) {

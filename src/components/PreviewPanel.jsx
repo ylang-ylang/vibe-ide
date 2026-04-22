@@ -45,6 +45,8 @@ export default function PreviewPanel({
   displayedPreviewText,
   previewPath,
   previewSourceLanguage,
+  previewContentKind,
+  rawSourceCodeRows,
   selectedSymbolCodeRows,
   previewSymbols,
   copyStatus,
@@ -52,6 +54,7 @@ export default function PreviewPanel({
   translationModel,
   isTranslating,
   isShowingTranslated,
+  isLoadingPythonSymbols,
   mermaidDirection,
   selectedSymbol,
   isMermaidInteractive,
@@ -76,9 +79,11 @@ export default function PreviewPanel({
     translationError,
     translationModel,
   });
-  const showCodePanel = Boolean(selectedSymbol && selectedSymbolCodeRows.length > 0);
+  const showSelectedCodePanel = Boolean(selectedSymbol && selectedSymbolCodeRows.length > 0);
   const showMermaidPanel = Boolean(displayedPreviewText);
-  const useSplitPreview = showMermaidPanel && showCodePanel;
+  const showRawSourcePanel = previewContentKind === "text" && rawSourceCodeRows.length > 0;
+  const showBinaryPlaceholder = previewContentKind === "binary";
+  const useSplitPreview = showMermaidPanel && showSelectedCodePanel;
 
   useEffect(() => {
     if (!useSplitPreview) {
@@ -244,7 +249,7 @@ export default function PreviewPanel({
               </div>
             </section>
           </div>
-        ) : showCodePanel ? (
+        ) : showSelectedCodePanel ? (
           <section className="preview-section preview-section-full">
             <div className="preview-section-strip">
               <div className="strip-left">
@@ -291,6 +296,47 @@ export default function PreviewPanel({
               isInteractive={isMermaidInteractive}
               onSymbolSelect={onSymbolSelect}
             />
+          </section>
+        ) : showRawSourcePanel ? (
+          <section className="preview-section preview-section-full">
+            <div className="preview-section-strip">
+              <div className="strip-left">
+                <strong>source preview</strong>
+                <span className="symbol-kind-badge symbol-kind-file">file</span>
+                {previewPath ? <span className="preview-path">{previewPath}</span> : null}
+              </div>
+              <span className="status muted">
+                {isLoadingPythonSymbols ? "loading python symbol preview..." : "raw file content"}
+              </span>
+            </div>
+
+            <div className="symbol-detail-card">
+              <span className="status muted">
+                {isLoadingPythonSymbols
+                  ? "python source is loaded. semantic preview is being fetched separately."
+                  : "frontend-owned source rendering for non-symbol preview."}
+              </span>
+            </div>
+
+            <div className="preview-block symbol-source-block">
+              <CodeBlockView rows={rawSourceCodeRows} language={previewSourceLanguage} />
+            </div>
+          </section>
+        ) : showBinaryPlaceholder ? (
+          <section className="preview-section preview-section-full">
+            <div className="preview-section-strip">
+              <div className="strip-left">
+                <strong>preview unavailable</strong>
+                <span className="symbol-kind-badge symbol-kind-file">binary</span>
+                {previewPath ? <span className="preview-path">{previewPath}</span> : null}
+              </div>
+            </div>
+
+            <div className="symbol-detail-card">
+              <span className="status muted">
+                binary / unsupported preview. frontend keeps the UI decision here and does not render file bytes inline.
+              </span>
+            </div>
           </section>
         ) : (
           <pre className="preview-block">

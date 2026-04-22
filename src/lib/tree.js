@@ -1,6 +1,5 @@
 export const KIND_ICON = {
   directory: "D",
-  module: "PY",
   file: "F",
 };
 
@@ -13,8 +12,6 @@ export function matchNode(node, searchTerm) {
     node.data.name,
     node.data.path,
     node.data.summary,
-    node.data.symbol_mermaid,
-    node.data.symbol_outline_xml,
     node.data.git_status?.title,
   ].filter(Boolean);
 

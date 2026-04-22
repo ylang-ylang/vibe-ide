@@ -8,6 +8,23 @@
 - XML outline copy for Python modules
 - Mermaid translation through the local translator service
 
+## Python Script-Flow Extraction
+
+Status: todo
+
+Goal:
+- Extend the current Python symbol extraction so script-style files are not reduced to only `class` / `def` declarations.
+
+Why:
+- Current `ast` extraction mainly captures declarations and one `__main__` guard node.
+- Non-declaration statements such as `if`, `for`, `while`, `try`, assignments, and call flow are mostly dropped.
+- This makes entry scripts and demo scripts look structurally incomplete in Mermaid and XML outline.
+
+Scope:
+- Keep the current declaration extraction.
+- Add a lightweight `script_flow` view for `__main__` and other statement-heavy sections.
+- Improve Mermaid and XML outline output for script-oriented Python files.
+
 ## LSP / DocumentSymbol as Symbol Extraction Backend
 
 Status: todo

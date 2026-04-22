@@ -6,7 +6,6 @@ export default function RepoTreePanel({
   selectedRepoRoot,
   repoRoots,
   selectedRepoOption,
-  isRefreshingRoots,
   isLoadingTree,
   treePayload,
   visibleTreeNodes,
@@ -19,7 +18,6 @@ export default function RepoTreePanel({
   treeApiRef,
   treeViewportRef,
   onRepoRootChange,
-  onRefreshRepoRoots,
   onSearchTermChange,
   onExpandTarget,
   onCollapseTarget,
@@ -36,12 +34,14 @@ export default function RepoTreePanel({
     const icon = KIND_ICON[node.data.kind] ?? "?";
     const gitStatus = node.data.git_status || null;
     const gitStatusKind = gitStatus?.display_kind || gitStatus?.kind || null;
+    const isDirectory = node.data.kind === "directory";
+    const displayLabel = isDirectory ? `${node.data.name}/` : node.data.name;
 
     function handleActivate() {
       node.select();
       onRememberActiveNode(node, "click");
 
-      if (node.data.kind === "module" || node.data.kind === "file") {
+      if (node.data.kind === "file") {
         void onPreviewNodeActivate(node);
         return;
       }
@@ -60,10 +60,10 @@ export default function RepoTreePanel({
         role="treeitem"
         aria-label={node.data.name}
       >
-        <div className="tree-row-content" style={{ paddingLeft: `${node.level * 18 + 8}px` }}>
+        <div className="tree-row-content" style={{ paddingLeft: `${node.level * 14 + 6}px` }}>
           <button
             type="button"
-            className="toggle"
+            className={`toggle ${isBranch ? "" : "toggle-leaf"} ${node.isOpen ? "is-open" : ""}`}
             onClick={(event) => {
               event.stopPropagation();
               if (isBranch) {
@@ -72,11 +72,12 @@ export default function RepoTreePanel({
                 node.toggle();
               }
             }}
+            aria-label={isBranch ? (node.isOpen ? "collapse directory" : "expand directory") : undefined}
           >
-            {isBranch ? (node.isOpen ? "-" : "+") : ""}
+            {isBranch ? <span className="toggle-chevron" aria-hidden="true" /> : null}
           </button>
           <span className={`kind kind-${node.data.kind}`}>{icon}</span>
-          <span className="label">{node.data.name}</span>
+          <span className={`label ${isDirectory ? "label-directory" : ""}`}>{displayLabel}</span>
           {gitStatus ? (
             <span
               className={`git-status-badge git-status-${gitStatusKind} git-status-scope-${gitStatus.scope}`}
@@ -127,16 +128,6 @@ export default function RepoTreePanel({
               </option>
             ))}
           </select>
-          <button type="button" onClick={() => void onRefreshRepoRoots()} disabled={isRefreshingRoots}>
-            {isRefreshingRoots ? "refreshing..." : "refresh"}
-          </button>
-          <button
-            type="button"
-            className="action-button tree-collapse-button"
-            onClick={onToggleCollapsed}
-          >
-            collapse
-          </button>
         </div>
 
         <div className="control-group search-control">
@@ -206,8 +197,8 @@ export default function RepoTreePanel({
                   data={visibleTreeNodes}
                   openByDefault={false}
                   onToggle={onTreeToggleStateChange}
-                  rowHeight={34}
-                  indent={18}
+                  rowHeight={32}
+                  indent={14}
                   paddingTop={8}
                   paddingBottom={8}
                   width="100%"

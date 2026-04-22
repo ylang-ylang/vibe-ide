@@ -46,3 +46,15 @@ export function buildCodeRowsForSelectedSymbol(sourceText, sourceGitInfo, select
 
   return rows;
 }
+
+export function buildCodeRowsForWholeFile(sourceText, sourceGitInfo) {
+  if (!sourceText) {
+    return [];
+  }
+
+  const lineCount = sourceText.split(/\r?\n/).length;
+  return buildCodeRowsForSelectedSymbol(sourceText, sourceGitInfo, {
+    line: 1,
+    line_end: lineCount,
+  });
+}

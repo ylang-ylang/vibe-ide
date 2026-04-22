@@ -7,6 +7,7 @@ import argparse
 import json
 import logging
 import os
+import time
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,13 +15,30 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
-from generate_symbol_tree import build_tree_payload
+from generate_symbol_tree import (
+    EXCLUDED_DIRS,
+    build_preview_payload,
+    build_python_symbol_payload,
+    build_tree_payload,
+    should_track_repo_path,
+)
+
+try:
+    from watchfiles import watch
+except ImportError:
+    watch = None
 
 
 API_PORT = 8765
 DEFAULT_TRANSLATE_SERVER_BASE_URL = "http://127.0.0.1:8766"
 LOGGER = logging.getLogger("repo_symbol_tree.app_server")
 MAX_SCAN_DEPTH = 5
+PREVIEW_WATCH_POLL_INTERVAL_SECONDS = 0.4
+PREVIEW_WATCH_KEEPALIVE_SECONDS = 10.0
+TREE_WATCH_POLL_INTERVAL_SECONDS = 1.0
+TREE_WATCH_KEEPALIVE_SECONDS = 10.0
+TREE_WATCH_DEBOUNCE_MS = 300
+TREE_WATCH_RUST_TIMEOUT_MS = 5_000
 SKIP_SCAN_DIRS = {
     ".cache",
     ".cargo",
@@ -43,6 +61,14 @@ SKIP_SCAN_DIRS = {
     "node_modules",
     "venv",
 }
+
+
+class PreviewWatchDisconnectedError(ConnectionError):
+    """Client closed the preview watch SSE connection."""
+
+
+class TreeWatchDisconnectedError(ConnectionError):
+    """Client closed the tree watch SSE connection."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,6 +143,15 @@ class AppState:
     def build_tree(self, repo_root: str) -> dict:
         return build_tree_payload(self._validate_repo_root(repo_root))
 
+    def build_preview(self, repo_root: str, relative_path: str) -> dict:
+        return build_preview_payload(self._validate_repo_root(repo_root), relative_path)
+
+    def build_python_symbols(self, repo_root: str, relative_path: str) -> dict:
+        return build_python_symbol_payload(self._validate_repo_root(repo_root), relative_path)
+
+    def resolve_repo_root(self, repo_root: str | Path) -> Path:
+        return self._validate_repo_root(repo_root)
+
     def _resolve_config_path(self) -> Path:
         xdg_home = os.environ.get("XDG_CONFIG_HOME")
         if xdg_home:
@@ -190,6 +225,79 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
                 self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             self._send_json(payload)
+            return
+
+        if parsed.path == "/api/preview":
+            repo_root = parse_qs(parsed.query).get("repo_root", [""])[0]
+            relative_path = parse_qs(parsed.query).get("path", [""])[0]
+            if not repo_root:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "missing repo_root")
+                return
+            if not relative_path:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "missing path")
+                return
+            try:
+                payload = self.app_state.build_preview(repo_root, relative_path)
+            except ValueError as exc:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._send_json(payload)
+            return
+
+        if parsed.path == "/api/python-symbol-preview":
+            repo_root = parse_qs(parsed.query).get("repo_root", [""])[0]
+            relative_path = parse_qs(parsed.query).get("path", [""])[0]
+            if not repo_root:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "missing repo_root")
+                return
+            if not relative_path:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "missing path")
+                return
+            try:
+                payload = self.app_state.build_python_symbols(repo_root, relative_path)
+            except ValueError as exc:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._send_json(payload)
+            return
+
+        if parsed.path == "/api/watch-preview":
+            repo_root = parse_qs(parsed.query).get("repo_root", [""])[0]
+            relative_path = parse_qs(parsed.query).get("path", [""])[0]
+            since_signature = parse_qs(parsed.query).get("since_signature", [""])[0]
+            if not repo_root:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "missing repo_root")
+                return
+            if not relative_path:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "missing path")
+                return
+            try:
+                self._stream_preview_watch(
+                    repo_root=repo_root,
+                    relative_path=relative_path,
+                    since_signature=since_signature,
+                )
+            except PreviewWatchDisconnectedError:
+                LOGGER.info("preview watch disconnected: %s", relative_path)
+            except ValueError as exc:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+
+        if parsed.path == "/api/watch-tree":
+            repo_root = parse_qs(parsed.query).get("repo_root", [""])[0]
+            since_signature = parse_qs(parsed.query).get("since_signature", [""])[0]
+            if not repo_root:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, "missing repo_root")
+                return
+            try:
+                self._stream_tree_watch(
+                    repo_root=repo_root,
+                    since_signature=since_signature,
+                )
+            except TreeWatchDisconnectedError:
+                LOGGER.info("tree watch disconnected: %s", repo_root)
+            except ValueError as exc:
+                self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
             return
 
         if self.app_state.static_dir is not None:
@@ -274,6 +382,223 @@ class RepoSymbolTreeHandler(SimpleHTTPRequestHandler):
     def _send_error_json(self, status: HTTPStatus, message: str) -> None:
         self._send_json({"error": message}, status=status)
 
+    def _stream_preview_watch(
+        self,
+        *,
+        repo_root: str,
+        relative_path: str,
+        since_signature: str,
+    ) -> None:
+        repo_root_path = self.app_state.resolve_repo_root(repo_root)
+        initial_payload = self.app_state.build_preview(str(repo_root_path), relative_path)
+        normalized_relative_path = initial_payload["path"]
+        watched_path = (repo_root_path / normalized_relative_path).resolve()
+        if not watched_path.is_relative_to(repo_root_path):
+            raise ValueError(f"path must stay inside repo root: {normalized_relative_path}")
+        if not watched_path.is_file():
+            raise ValueError(f"path is not a file: {normalized_relative_path}")
+
+        last_signature = self._read_preview_signature(watched_path)
+        self._send_sse_headers()
+
+        if since_signature and since_signature == last_signature:
+            self._write_sse_event(
+                "watch_ready",
+                {
+                    "path": normalized_relative_path,
+                    "source_signature": last_signature,
+                },
+            )
+        else:
+            self._write_sse_event("preview", initial_payload)
+
+        next_keepalive_at = time.monotonic() + PREVIEW_WATCH_KEEPALIVE_SECONDS
+        while True:
+            time.sleep(PREVIEW_WATCH_POLL_INTERVAL_SECONDS)
+            current_signature = self._read_preview_signature(watched_path, allow_missing=True)
+            if current_signature is None:
+                self._write_sse_event(
+                    "preview_error",
+                    {"error": f"watched file disappeared: {normalized_relative_path}"},
+                )
+                return
+
+            if current_signature != last_signature:
+                last_signature = current_signature
+                try:
+                    payload = self.app_state.build_preview(str(repo_root_path), normalized_relative_path)
+                except ValueError:
+                    self._write_sse_event(
+                        "preview_error",
+                        {"error": f"failed to rebuild preview for: {normalized_relative_path}"},
+                    )
+                    return
+                self._write_sse_event("preview", payload)
+                next_keepalive_at = time.monotonic() + PREVIEW_WATCH_KEEPALIVE_SECONDS
+                continue
+
+            if time.monotonic() >= next_keepalive_at:
+                self._write_sse_comment("keepalive")
+                next_keepalive_at = time.monotonic() + PREVIEW_WATCH_KEEPALIVE_SECONDS
+
+    def _send_sse_headers(self) -> None:
+        self.send_response(HTTPStatus.OK.value)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+    def _write_sse_event(self, event_name: str, payload: dict) -> None:
+        try:
+            encoded = json.dumps(payload, ensure_ascii=False)
+            message = f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8")
+            self.wfile.write(message)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            raise PreviewWatchDisconnectedError("client disconnected from preview watch stream") from None
+
+    def _write_sse_comment(self, text: str) -> None:
+        try:
+            self.wfile.write(f": {text}\n\n".encode("utf-8"))
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            raise PreviewWatchDisconnectedError("client disconnected from preview watch stream") from None
+
+    def _read_preview_signature(self, path: Path, *, allow_missing: bool = False) -> str | None:
+        try:
+            stat_result = path.stat()
+        except FileNotFoundError:
+            if allow_missing:
+                return None
+            raise
+        return f"{stat_result.st_mtime_ns}:{stat_result.st_size}"
+
+    def _stream_tree_watch(
+        self,
+        *,
+        repo_root: str,
+        since_signature: str,
+    ) -> None:
+        repo_root_path = self.app_state.resolve_repo_root(repo_root)
+        initial_payload = self.app_state.build_tree(str(repo_root_path))
+        last_signature = initial_payload["meta"].get("tree_signature", "")
+        self._send_sse_headers()
+
+        if since_signature and since_signature == last_signature:
+            self._write_tree_sse_event(
+                "watch_ready",
+                {
+                    "repo_root": str(repo_root_path),
+                    "tree_signature": last_signature,
+                },
+            )
+        else:
+            self._write_tree_sse_event("tree", initial_payload)
+
+        if watch is not None:
+            self._stream_tree_watch_via_watchfiles(
+                repo_root_path=repo_root_path,
+                last_signature=last_signature,
+            )
+            return
+
+        self._stream_tree_watch_via_polling(
+            repo_root_path=repo_root_path,
+            last_signature=last_signature,
+        )
+
+    def _stream_tree_watch_via_watchfiles(
+        self,
+        *,
+        repo_root_path: Path,
+        last_signature: str,
+    ) -> None:
+        next_keepalive_at = time.monotonic() + TREE_WATCH_KEEPALIVE_SECONDS
+
+        for changes in watch(
+            str(repo_root_path),
+            watch_filter=lambda change, changed_path: self._should_watch_tree_path(
+                repo_root_path,
+                changed_path,
+            ),
+            debounce=TREE_WATCH_DEBOUNCE_MS,
+            rust_timeout=TREE_WATCH_RUST_TIMEOUT_MS,
+            yield_on_timeout=True,
+        ):
+            if not changes:
+                if time.monotonic() >= next_keepalive_at:
+                    self._write_tree_sse_comment("keepalive")
+                    next_keepalive_at = time.monotonic() + TREE_WATCH_KEEPALIVE_SECONDS
+                continue
+
+            payload = self.app_state.build_tree(str(repo_root_path))
+            current_signature = payload["meta"].get("tree_signature", "")
+            if current_signature == last_signature:
+                continue
+
+            last_signature = current_signature
+            self._write_tree_sse_event("tree", payload)
+            next_keepalive_at = time.monotonic() + TREE_WATCH_KEEPALIVE_SECONDS
+
+    def _stream_tree_watch_via_polling(
+        self,
+        *,
+        repo_root_path: Path,
+        last_signature: str,
+    ) -> None:
+        next_keepalive_at = time.monotonic() + TREE_WATCH_KEEPALIVE_SECONDS
+
+        while True:
+            time.sleep(TREE_WATCH_POLL_INTERVAL_SECONDS)
+            payload = self.app_state.build_tree(str(repo_root_path))
+            current_signature = payload["meta"].get("tree_signature", "")
+            if current_signature != last_signature:
+                last_signature = current_signature
+                self._write_tree_sse_event("tree", payload)
+                next_keepalive_at = time.monotonic() + TREE_WATCH_KEEPALIVE_SECONDS
+                continue
+
+            if time.monotonic() >= next_keepalive_at:
+                self._write_tree_sse_comment("keepalive")
+                next_keepalive_at = time.monotonic() + TREE_WATCH_KEEPALIVE_SECONDS
+
+    def _should_watch_tree_path(self, repo_root_path: Path, changed_path: str) -> bool:
+        candidate_path = Path(changed_path)
+        try:
+            relative_path = candidate_path.resolve().relative_to(repo_root_path).as_posix()
+        except ValueError:
+            return False
+
+        if relative_path in {".git/index", ".git/HEAD", ".git/packed-refs"}:
+            return True
+        if relative_path.startswith(".git/refs/"):
+            return True
+
+        relative_parts = Path(relative_path).parts
+        if any(part in EXCLUDED_DIRS for part in relative_parts):
+            return False
+        if any(part.startswith(".") and part not in {".codex"} for part in relative_parts[:-1]):
+            return False
+
+        return should_track_repo_path(relative_path)
+
+    def _write_tree_sse_event(self, event_name: str, payload: dict) -> None:
+        try:
+            encoded = json.dumps(payload, ensure_ascii=False)
+            message = f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8")
+            self.wfile.write(message)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            raise TreeWatchDisconnectedError("client disconnected from tree watch stream") from None
+
+    def _write_tree_sse_comment(self, text: str) -> None:
+        try:
+            self.wfile.write(f": {text}\n\n".encode("utf-8"))
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            raise TreeWatchDisconnectedError("client disconnected from tree watch stream") from None
+
     def _proxy_translate_request(self, method: str) -> None:
         parsed = urlparse(self.path)
         proxied_path = parsed.path.removeprefix("/translate-api") or "/"
@@ -334,9 +659,14 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
     )
+    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
     app_state = AppState(static_dir=args.static_dir)
     server = ThreadingHTTPServer((args.host, args.port), RepoSymbolTreeHandler)
     server.app_state = app_state  # type: ignore[attr-defined]
+    LOGGER.info(
+        "tree watch backend: %s",
+        "watchfiles" if watch is not None else f"polling every {TREE_WATCH_POLL_INTERVAL_SECONDS:.1f}s",
+    )
     LOGGER.info("repo-symbol-tree server listening on http://%s:%s", args.host, args.port)
     server.serve_forever()
 
