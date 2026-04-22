@@ -22,22 +22,10 @@ class MermaidBlockType:
     name: str
     shape: str
     fill: str
-    stroke: str
-    stroke_width: str
-    color: str
-    stroke_dasharray: str | None = None
 
     def render_class_def(self) -> str:
         """Render one Mermaid `classDef` line."""
-        style_parts = [
-            f"fill:{self.fill}",
-            f"stroke:{self.stroke}",
-            f"stroke-width:{self.stroke_width}",
-        ]
-        if self.stroke_dasharray:
-            style_parts.append(f"stroke-dasharray: {self.stroke_dasharray}")
-        style_parts.append(f"color:{self.color}")
-        return f"    classDef {self.name} {','.join(style_parts)};"
+        return f"    classDef {self.name} fill:{self.fill};"
 
 
 @dataclass(frozen=True)
@@ -128,36 +116,19 @@ class MermaidBlockConfig:
 
             shape = block_type_config.get("shape", "rect")
             fill = block_type_config.get("fill")
-            stroke = block_type_config.get("stroke")
-            stroke_width = block_type_config.get("stroke_width", "1.2px")
-            color = block_type_config.get("color", "#1b1814")
-            stroke_dasharray = block_type_config.get("stroke_dasharray")
-
             required_fields = {
                 "shape": shape,
                 "fill": fill,
-                "stroke": stroke,
-                "stroke_width": stroke_width,
-                "color": color,
             }
             for field_name, field_value in required_fields.items():
                 if not isinstance(field_value, str) or not field_value:
                     raise MermaidBlockConfigError(
                         f"{config_path}: [block_types.{block_type_name}] {field_name} must be a non-empty string"
                     )
-            if stroke_dasharray is not None and (not isinstance(stroke_dasharray, str) or not stroke_dasharray):
-                raise MermaidBlockConfigError(
-                    f"{config_path}: [block_types.{block_type_name}] stroke_dasharray must be a non-empty string when set"
-                )
-
             block_types[block_type_name] = MermaidBlockType(
                 name=block_type_name,
                 shape=shape,
                 fill=fill,
-                stroke=stroke,
-                stroke_width=stroke_width,
-                color=color,
-                stroke_dasharray=stroke_dasharray,
             )
 
         normalized_render_order: list[str] = []

@@ -1,0 +1,101 @@
+# Git status metadata and Mermaid outline colors.
+# Colors follow the VS Code dark theme conventions used by the tree panel.
+# Read top-down as higher-priority to lower-priority.
+
+priority_order = [
+  "error",
+  "conflicted",
+  "mixed",
+  "deleted",
+  "modified",
+  "added",
+  "renamed",
+  "copied",
+  "typechanged",
+  "untracked",
+  "neutral",
+]
+
+[statuses.neutral]
+label = "neutral"
+mermaid_stroke = "#6e7681"
+mermaid_stroke_width = "2.0px"
+mermaid_color = "#1b1814"
+
+[statuses.error]
+label = "error"
+mermaid_stroke = "#e4676b"
+mermaid_stroke_width = "5.4px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.conflicted]
+code = "!"
+label = "conflicted"
+mermaid_stroke = "#e4676b"
+mermaid_stroke_width = "5.4px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.deleted]
+code = "D"
+label = "deleted"
+mermaid_stroke = "#c74e39"
+mermaid_stroke_width = "5.2px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.modified]
+code = "M"
+label = "modified"
+mermaid_stroke = "#e2c08d"
+mermaid_stroke_width = "5.0px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.added]
+code = "A"
+label = "added"
+mermaid_stroke = "#00ff2f"
+mermaid_stroke_width = "5.0px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.renamed]
+code = "R"
+label = "renamed"
+mermaid_stroke = "#73c991"
+mermaid_stroke_width = "5.0px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.copied]
+code = "C"
+label = "copied"
+mermaid_stroke = "#73c991"
+mermaid_stroke_width = "5.0px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.typechanged]
+code = "T"
+label = "type changed"
+mermaid_stroke = "#8db9e2"
+mermaid_stroke_width = "5.0px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.untracked]
+code = "U"
+label = "untracked"
+mermaid_stroke = "#73c991"
+mermaid_stroke_width = "5.0px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"
+
+[statuses.mixed]
+label = "mixed"
+mermaid_stroke = "#ff4a50"
+mermaid_stroke_width = "5.4px"
+mermaid_color = "#1b1814"
+mermaid_stroke_dasharray = "10 6"

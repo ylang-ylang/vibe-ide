@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from .common import GIT_STATUS_META, HUNK_HEADER_RE
+from .common import GIT_STATUS_META, HUNK_HEADER_RE, git_status_meta_entry
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,13 +165,13 @@ def git_status_ancestor_directories(path: str) -> list[str]:
 
 def build_direct_git_status(kind: str) -> dict:
     """Build the direct git status badge payload for one changed file."""
-    meta = GIT_STATUS_META[kind]
+    meta = git_status_meta_entry(kind)
     return {
-        "code": meta["code"],
+        "code": meta.code,
         "kind": kind,
         "scope": "direct",
         "count": 1,
-        "title": meta["label"],
+        "title": meta.label,
     }
 
 
@@ -180,14 +180,14 @@ def build_directory_git_status(counter: Counter[str]) -> dict:
     total_count = sum(counter.values())
     dominant_kind = max(
         counter.items(),
-        key=lambda item: (GIT_STATUS_META[item[0]]["priority"], item[1], item[0]),
+        key=lambda item: (git_status_meta_entry(item[0]).priority, item[1], item[0]),
     )[0]
-    meta = GIT_STATUS_META[dominant_kind]
+    meta = git_status_meta_entry(dominant_kind)
     mixed = len(counter) > 1
-    title_parts = [f"{count} {GIT_STATUS_META[kind]['label']}" for kind, count in sorted(counter.items())]
+    title_parts = [f"{count} {git_status_meta_entry(kind).label}" for kind, count in sorted(counter.items())]
 
     return {
-        "code": meta["code"] if total_count == 1 else str(total_count),
+        "code": meta.code if total_count == 1 else str(total_count),
         "kind": "mixed" if mixed else dominant_kind,
         "display_kind": dominant_kind,
         "scope": "children",

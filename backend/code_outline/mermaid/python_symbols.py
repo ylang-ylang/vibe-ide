@@ -6,6 +6,8 @@ import ast
 import html
 from pathlib import Path
 
+from ..git import collect_git_repo_state, collect_preview_source_git_info
+from ..git.common import git_status_mermaid_style, git_status_meta_entry
 from ..shared import build_source_signature, first_line, is_python_file, resolve_preview_target
 from .blocks import load_mermaid_block_config
 
@@ -13,6 +15,7 @@ from .blocks import load_mermaid_block_config
 def build_python_symbol_payload(repo_root: str | Path, relative_path: str) -> dict:
     """Build the Python semantic preview payload for one repo-relative Python file."""
     repo_root_path = Path(repo_root).resolve()
+    git_state = collect_git_repo_state(repo_root_path)
     target_path, normalized_relative_path = resolve_preview_target(
         repo_root=repo_root_path,
         relative_path=relative_path,
@@ -20,7 +23,17 @@ def build_python_symbol_payload(repo_root: str | Path, relative_path: str) -> di
     if not is_python_file(normalized_relative_path):
         raise ValueError(f"path is not a Python file: {normalized_relative_path}")
 
-    payload = _build_python_symbol_preview(target_path, normalized_relative_path)
+    preview_source_git_info = collect_preview_source_git_info(
+        repo_root_path,
+        normalized_relative_path,
+        git_state.exact_status,
+    )
+    payload = _build_python_symbol_preview(
+        target_path,
+        normalized_relative_path,
+        file_git_status=git_state.exact_status.get(normalized_relative_path),
+        preview_source_git_info=preview_source_git_info,
+    )
     payload["source_signature"] = build_source_signature(target_path)
     return payload
 
@@ -28,6 +41,9 @@ def build_python_symbol_payload(repo_root: str | Path, relative_path: str) -> di
 def _build_python_symbol_preview(
     path: Path,
     relative_path: str,
+    *,
+    file_git_status: dict | None,
+    preview_source_git_info: dict | None,
 ) -> dict:
     source = path.read_text(encoding="utf-8")
     source_lines = source.splitlines()
@@ -49,7 +65,11 @@ def _build_python_symbol_preview(
                     line_count=max(1, len(source_lines)),
                 )
             ],
-            "symbol_mermaid": _render_parse_error_mermaid(relative_path, exc.msg),
+            "symbol_mermaid": _render_parse_error_mermaid(
+                relative_path,
+                exc.msg,
+                file_git_status_kind=_file_git_status_kind(file_git_status),
+            ),
             "symbol_outline_xml": _render_parse_error_outline_xml(relative_path, exc.msg),
         }
 
@@ -66,24 +86,32 @@ def _build_python_symbol_preview(
         elif _is_main_guard(node):
             main_guard = node
 
+    symbol_nodes = _build_module_symbol_nodes(
+        module_path=relative_path,
+        module_doc=module_doc,
+        classes=classes,
+        functions=functions,
+        source_line_count=max(1, len(source_lines)),
+    )
+    symbol_git_status_kinds = _build_symbol_git_status_kinds(
+        symbol_nodes=symbol_nodes,
+        file_git_status=file_git_status,
+        preview_source_git_info=preview_source_git_info,
+    )
+
     return {
         "id": f"module::{relative_path}",
         "name": path.name,
         "kind": "module",
         "path": relative_path,
         "summary": module_doc or "Python module",
-        "symbol_nodes": _build_module_symbol_nodes(
-            module_path=relative_path,
-            module_doc=module_doc,
-            classes=classes,
-            functions=functions,
-            source_line_count=max(1, len(source_lines)),
-        ),
+        "symbol_nodes": _attach_symbol_git_status_kinds(symbol_nodes, symbol_git_status_kinds),
         "symbol_mermaid": _render_module_symbol_mermaid(
             module_path=relative_path,
             module_doc=module_doc,
             classes=classes,
             functions=functions,
+            symbol_git_status_kinds=symbol_git_status_kinds,
         ),
         "symbol_outline_xml": _render_module_outline_xml(
             module_path=relative_path,
@@ -113,7 +141,12 @@ def _build_whole_file_symbol_node(
     }
 
 
-def _render_parse_error_mermaid(module_path: str, error_message: str) -> str:
+def _render_parse_error_mermaid(
+    module_path: str,
+    error_message: str,
+    *,
+    file_git_status_kind: str | None,
+) -> str:
     block_config = load_mermaid_block_config()
     module_label = _build_mermaid_label(module_path, "Python module")
     error_label = _build_mermaid_label("Parse error", error_message)
@@ -123,6 +156,11 @@ def _render_parse_error_mermaid(module_path: str, error_message: str) -> str:
             *block_config.render_class_defs("module", "parse_error"),
             *block_config.render_node_lines(node_id="module", label=module_label, semantic_role="module"),
             *block_config.render_node_lines(node_id="parse_error", label=error_label, semantic_role="parse_error"),
+            _render_mermaid_status_style(
+                "module",
+                file_git_status_kind or "neutral",
+            ),
+            _render_mermaid_status_style("parse_error", "error"),
             "    module --> parse_error",
         ]
     )
@@ -212,6 +250,7 @@ def _render_module_symbol_mermaid(
     module_doc: str | None,
     classes: list[ast.ClassDef],
     functions: list[ast.FunctionDef | ast.AsyncFunctionDef],
+    symbol_git_status_kinds: dict[str, str],
 ) -> str:
     block_config = load_mermaid_block_config()
     lines: list[str] = [
@@ -223,6 +262,7 @@ def _render_module_symbol_mermaid(
     lines.extend(
         block_config.render_node_lines(node_id="module", label=module_label, semantic_role="module")
     )
+    lines.append(_render_mermaid_status_style("module", symbol_git_status_kinds.get("module", "neutral")))
 
     if not classes and not functions:
         lines.extend(
@@ -232,6 +272,7 @@ def _render_module_symbol_mermaid(
                 semantic_role="empty",
             )
         )
+        lines.append(_render_mermaid_status_style("empty", "neutral"))
         lines.append("    module --> empty")
         return "\n".join(lines)
 
@@ -244,6 +285,7 @@ def _render_module_symbol_mermaid(
         lines.extend(
             block_config.render_node_lines(node_id=class_id, label=class_label, semantic_role="class")
         )
+        lines.append(_render_mermaid_status_style(class_id, symbol_git_status_kinds.get(class_id, "neutral")))
         lines.append(f"    module --> {class_id}")
 
         methods = [
@@ -262,6 +304,7 @@ def _render_module_symbol_mermaid(
             lines.extend(
                 block_config.render_node_lines(node_id=method_id, label=method_label, semantic_role="method")
             )
+            lines.append(_render_mermaid_status_style(method_id, symbol_git_status_kinds.get(method_id, "neutral")))
             lines.append(f"    {class_id} --> {method_id}")
 
     for function_index, function_node in enumerate(functions):
@@ -277,9 +320,115 @@ def _render_module_symbol_mermaid(
                 semantic_role="function",
             )
         )
+        lines.append(_render_mermaid_status_style(function_id, symbol_git_status_kinds.get(function_id, "neutral")))
         lines.append(f"    module --> {function_id}")
 
     return "\n".join(lines)
+
+
+def _render_mermaid_status_style(node_id: str, status_kind: str) -> str:
+    style = git_status_mermaid_style(status_kind)
+    style_parts = [
+        f"stroke:{style.stroke}",
+        f"stroke-width:{style.stroke_width}",
+        f"color:{style.color}",
+    ]
+    if style.stroke_dasharray:
+        style_parts.append(f"stroke-dasharray:{style.stroke_dasharray}")
+    return f"    style {node_id} {','.join(style_parts)}"
+
+
+def _file_git_status_kind(file_git_status: dict | None) -> str | None:
+    if not file_git_status:
+        return None
+    kind = file_git_status.get("kind")
+    return kind if isinstance(kind, str) and kind else None
+
+
+def _attach_symbol_git_status_kinds(symbol_nodes: list[dict], symbol_git_status_kinds: dict[str, str]) -> list[dict]:
+    attached_nodes: list[dict] = []
+    for symbol_node in symbol_nodes:
+        status_kind = symbol_git_status_kinds.get(symbol_node["id"])
+        if status_kind:
+            attached_nodes.append({**symbol_node, "git_status_kind": status_kind})
+        else:
+            attached_nodes.append(symbol_node)
+    return attached_nodes
+
+
+def _build_symbol_git_status_kinds(
+    *,
+    symbol_nodes: list[dict],
+    file_git_status: dict | None,
+    preview_source_git_info: dict | None,
+) -> dict[str, str]:
+    file_git_status_kind = _file_git_status_kind(file_git_status)
+    if file_git_status_kind in {"conflicted", "deleted", "renamed", "copied", "typechanged", "untracked"}:
+        return {
+            symbol_node["id"]: file_git_status_kind
+            for symbol_node in symbol_nodes
+        }
+
+    current_entries = list(preview_source_git_info.get("current", [])) if preview_source_git_info else []
+    deleted_entries = list(preview_source_git_info.get("deleted", [])) if preview_source_git_info else []
+    symbol_git_status_kinds: dict[str, str] = {}
+
+    for symbol_node in symbol_nodes:
+        line_start = max(1, int(symbol_node.get("line", 1)))
+        line_end = max(line_start, int(symbol_node.get("line_end", line_start)))
+        if symbol_node["id"] == "module":
+            if file_git_status_kind:
+                symbol_git_status_kinds["module"] = file_git_status_kind
+            continue
+        status_kind = _resolve_symbol_git_status_kind(
+            line_start=line_start,
+            line_end=line_end,
+            file_git_status_kind=file_git_status_kind,
+            current_entries=current_entries,
+            deleted_entries=deleted_entries,
+        )
+        if status_kind:
+            symbol_git_status_kinds[symbol_node["id"]] = status_kind
+
+    if "module" not in symbol_git_status_kinds:
+        symbol_git_status_kinds["module"] = file_git_status_kind or "neutral"
+    return symbol_git_status_kinds
+
+
+def _resolve_symbol_git_status_kind(
+    *,
+    line_start: int,
+    line_end: int,
+    file_git_status_kind: str | None,
+    current_entries: list[dict],
+    deleted_entries: list[dict],
+) -> str | None:
+    if file_git_status_kind in {"conflicted", "deleted", "renamed", "copied", "typechanged", "untracked"}:
+        return file_git_status_kind
+
+    matched_status_kinds: set[str] = set()
+
+    for entry in current_entries:
+        line_number = entry.get("line")
+        status_kind = entry.get("kind")
+        if isinstance(line_number, int) and isinstance(status_kind, str) and line_start <= line_number <= line_end:
+            matched_status_kinds.add(status_kind)
+
+    for entry in deleted_entries:
+        before_line = entry.get("before_line")
+        if isinstance(before_line, int) and line_start <= before_line <= line_end + 1:
+            matched_status_kinds.add("deleted")
+
+    if not matched_status_kinds:
+        return file_git_status_kind if line_start == 1 else None
+
+    if len(matched_status_kinds) == 1:
+        return next(iter(matched_status_kinds))
+
+    return max(
+        matched_status_kinds,
+        key=lambda status_kind: (git_status_meta_entry(status_kind).priority, status_kind),
+    )
 
 
 def _render_module_outline_xml(
